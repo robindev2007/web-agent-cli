@@ -30,6 +30,10 @@ export class MultiAgentOrchestrator {
     return this.motherProvider;
   }
 
+  public getWorkspace(): LocalWorkspace {
+    return this.workspace;
+  }
+
   /**
    * Spawns a dedicated sub-agent in a new browser tab
    */

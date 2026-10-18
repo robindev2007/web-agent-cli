@@ -113,16 +113,17 @@ export async function startTerminalUI() {
       } else if (mode === "multi") {
         await orchestrator.executeTask(goalText);
       } else {
-        const sub = orchestrator.createSubAgent("Solo Coder");
-        try {
-          await sub.loop.runTask(
-            goalText,
-            createAgentReporter(sub.id, { showTurn: true, showSummary: true }),
-          );
-        } finally {
-          // Free Chrome RAM immediately when solo agent finishes
-          await (sub.loop.getProvider() as any).closeTab?.().catch(() => {});
-        }
+        // SOLO MODE: Run directly on the already-connected Mother browser tab!
+        // No new tab opened, zero RAM overhead, instant response.
+        const soloLoop = new AgentLoop(
+          orchestrator.getMotherProvider(),
+          orchestrator.getWorkspace().getBaseDir(),
+          6
+        );
+        await soloLoop.runTask(
+          goalText,
+          createAgentReporter("solo", { showTurn: true, showSummary: true }),
+        );
       }
 
       const elapsedSec = ((performance.now() - startTime) / 1000).toFixed(1);
