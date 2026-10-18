@@ -61,6 +61,23 @@ export class MultiAgentOrchestrator {
     source: "ai" | "local";
     tasks?: string[];
   }> {
+    // Fast-path: Greetings and very short direct questions are inherently SOLO tasks
+    // Skip the classification round-trip to execute instantly!
+    const lower = userGoal.toLowerCase().trim();
+    const isGreetingOrDirectQuery =
+      /^(hi|hello|hey|greetings|how are you|what is your name|who are you|what can you do)\b/i.test(lower) ||
+      (lower.split(/\s+/).length <= 4 && !/(build|create|scaffold|fullstack|refactor|deploy)/i.test(lower));
+
+    if (isGreetingOrDirectQuery) {
+      return {
+        mode: "single",
+        reason: "Direct conversational inquiry (Instant Single Agent)",
+        confidence: "high",
+        source: "local",
+        tasks: [],
+      };
+    }
+
     // Only attempt AI classification when Chrome is actually connected
     if (!this.motherProvider.isReady()) {
       const local = classifyTask(userGoal);
