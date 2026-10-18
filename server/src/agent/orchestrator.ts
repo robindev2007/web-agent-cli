@@ -55,6 +55,7 @@ export class MultiAgentOrchestrator {
     reason: string;
     confidence: "high" | "medium" | "low";
     source: "ai" | "local";
+    tasks?: string[];
   }> {
     // Only attempt AI classification when Chrome is actually connected
     if (!this.motherProvider.isReady()) {
@@ -62,7 +63,8 @@ export class MultiAgentOrchestrator {
       return { ...local, source: "local" };
     }
 
-    const classifyPrompt = `You are a task routing agent. Decide whether the following task needs a MULTI-AGENT team (Mother + Sub-Agent + Reviewer) or a SOLO agent.
+    const classifyPrompt = `You are a task routing agent. Decide whether the following task needs a MULTI-AGENT team or a SOLO agent.
+Also, if the task has 2 or more distinct sub-tasks, list them as a concise string array. If simple/single, leave tasks empty.
 
 TASK: "${userGoal}"
 
@@ -71,9 +73,9 @@ Rules:
 - SINGLE: quick fixes, single file edits, simple scripts, lookups, renames, one command
 
 Respond ONLY with valid JSON, nothing else:
-{"mode":"multi","reason":"<1 sentence why>","confidence":"high"}
+{"mode":"multi","reason":"<1 sentence why>","confidence":"high","tasks":["build frontend","create api routes"]}
 or
-{"mode":"single","reason":"<1 sentence why>","confidence":"high"}
+{"mode":"single","reason":"<1 sentence why>","confidence":"high","tasks":[]}
 
 confidence must be "high", "medium", or "low".`;
 
@@ -91,8 +93,9 @@ confidence must be "high", "medium", or "low".`;
         ["high", "medium", "low"].includes(parsed.confidence)
           ? (parsed.confidence as "high" | "medium" | "low")
           : "medium";
+      const tasks = Array.isArray(parsed.tasks) ? parsed.tasks.filter((t: any) => typeof t === "string" && t.trim()) : [];
 
-      return { mode, reason, confidence, source: "ai" };
+      return { mode, reason, confidence, source: "ai", tasks };
     } catch {
       // AI unreachable / returned garbage — fall back silently to local classifier
       const local = classifyTask(userGoal);

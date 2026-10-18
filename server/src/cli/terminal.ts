@@ -5,7 +5,7 @@ import pc from "picocolors";
 import { MultiAgentOrchestrator } from "../agent/orchestrator";
 import { getPlatformInfo } from "../tools/workspace";
 import { createAgentReporter } from "./reporter";
-import { renderAgentHeader } from "./tui";
+import { renderAgentHeader, renderTaskBoard, type SubTaskItem } from "./tui";
 
 export async function startTerminalUI() {
   const rootWorkspace = resolve(process.cwd(), "..");
@@ -27,7 +27,7 @@ export async function startTerminalUI() {
   });
 
   while (true) {
-    // ── Input card prompt ──────────────────────────────────────────────────
+    // ── Input card prompt (Clean & always at the bottom of the previous card) ──
     const goal = await p.text({
       message: pc.bold(
         pc.white(`${figures.pointer} What would you like to build or solve?`),
@@ -49,19 +49,24 @@ export async function startTerminalUI() {
 
     // ── AI decides the best execution mode ─────────────────────────────────
     const spinner = p.spinner();
-    spinner.start("Analyzing task to select optimal agent architecture...");
+    spinner.start("Analyzing task & planning execution strategy...");
 
     const classification = await orchestrator.aiClassifyTask(goalText);
-    const { mode, reason, source } = classification;
+    const { mode, reason, source, tasks = [] } = classification;
 
-    spinner.stop("Architecture Selected");
+    spinner.stop("Execution Strategy Decided");
 
-    const modeBadge =
-      mode === "multi"
-        ? pc.bgMagenta(pc.black(" MULTI-AGENT SWARM ")) +
-          pc.magenta(" Mother Architect ➜ Sub-Agents ➜ Reviewer")
-        : pc.bgCyan(pc.black(" SOLO AGENT ")) +
-          pc.cyan(" Direct Rapid Execution");
+    // Can we run multiple sub-agents simultaneously?
+    const isParallel = mode === "multi" && tasks.length >= 2;
+
+    const modeBadge = isParallel
+      ? pc.bgMagenta(pc.black(" PARALLEL MULTI-AGENT SWARM ")) +
+        pc.magenta(` Spawning ${tasks.length} Sub-Agents at once`)
+      : mode === "multi"
+      ? pc.bgMagenta(pc.black(" MULTI-AGENT PIPELINE ")) +
+        pc.magenta(" Mother Architect ➜ Sub-Agents ➜ Reviewer")
+      : pc.bgCyan(pc.black(" SOLO AGENT ")) +
+        pc.cyan(" Direct Rapid Execution (No overhead)");
 
     const decisionSource =
       source === "ai"
@@ -74,11 +79,38 @@ export async function startTerminalUI() {
     console.log(`  ${figures.bullet} Engine: ${decisionSource}`);
     console.log();
 
-    // ── Execute ────────────────────────────────────────────────────────────
+    // ── Render Task Board if tasks exist (Only when task list is needed) ────
+    let subTaskItems: SubTaskItem[] = [];
+    if (tasks.length > 0) {
+      subTaskItems = tasks.map((t, idx) => ({
+        id: `task_${idx + 1}`,
+        title: t,
+        status: "pending",
+        agentId: isParallel ? `sub_${idx + 1}` : undefined,
+      }));
+      renderTaskBoard(subTaskItems);
+    }
+
+    // ── Execute (Parallel if multi-task, or standard pipeline / solo) ──────
     const startTime = performance.now();
 
     try {
-      if (mode === "multi") {
+      if (isParallel) {
+        // Run parallel tasks across dedicated browser tabs at the exact same time
+        const parallelMissions = tasks.map((t, idx) => ({
+          role: `Coder ${idx + 1}`,
+          mission: t,
+        }));
+
+        // Update task board items to running
+        subTaskItems.forEach((item) => (item.status = "running"));
+
+        await orchestrator.executeParallelTasks(parallelMissions);
+
+        // Update task board items to completed
+        subTaskItems.forEach((item) => (item.status = "completed"));
+        renderTaskBoard(subTaskItems);
+      } else if (mode === "multi") {
         await orchestrator.executeTask(goalText);
       } else {
         const sub = orchestrator.createSubAgent("Solo Coder");
@@ -100,7 +132,7 @@ export async function startTerminalUI() {
 
     console.log();
 
-    // ── Loop prompt ────────────────────────────────────────────────────────
+    // ── Clean prompt loop (Ready for next input always at the bottom) ─────
     const again = await p.confirm({
       message: pc.bold("Ready for next coding task?"),
       initialValue: true,

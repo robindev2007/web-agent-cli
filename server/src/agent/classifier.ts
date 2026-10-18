@@ -60,12 +60,13 @@ const SINGLE_KEYWORDS = [
 
 // ─── Scoring engine ───────────────────────────────────────────────────────────
 
-interface ClassificationResult {
+export interface ClassificationResult {
   mode: AgentMode;
   reason: string;
   confidence: "high" | "medium" | "low";
   multiScore: number;
   singleScore: number;
+  tasks?: string[];
 }
 
 /**
@@ -175,6 +176,20 @@ export function classifyTask(userPrompt: string): ClassificationResult {
   const confidence: "high" | "medium" | "low" =
     Math.abs(gap) >= 4 ? "high" : Math.abs(gap) >= 2 ? "medium" : "low";
 
+  // ── Extract Sub-tasks if applicable ─────────────────────────────────────
+  let tasks: string[] = [];
+  if (mode === "multi") {
+    // Split on common connectors or step patterns
+    const splitParts = userPrompt
+      .split(/(?:\band\s+then\b|\band\b|\balso\b|;|\n|\b\d+\.\s+)/i)
+      .map((s) => s.trim().replace(/^[-*•]\s*/, ""))
+      .filter((s) => s.length > 5);
+
+    if (splitParts.length >= 2) {
+      tasks = splitParts.slice(0, 4); // max 4 parallel tasks
+    }
+  }
+
   // Build human-readable reason
   const topReason =
     reasons.length > 0
@@ -189,5 +204,6 @@ export function classifyTask(userPrompt: string): ClassificationResult {
     confidence,
     multiScore,
     singleScore,
+    tasks,
   };
 }

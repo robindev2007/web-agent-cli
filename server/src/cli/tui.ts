@@ -2,6 +2,14 @@ import pc from "picocolors";
 import figures from "figures";
 import stringWidth from "string-width";
 
+export interface SubTaskItem {
+  id: string;
+  title: string;
+  status: "pending" | "running" | "completed" | "failed";
+  agentId?: string;
+  detail?: string;
+}
+
 export interface HeaderProps {
   title: string;
   version?: string;
@@ -24,9 +32,8 @@ export function stripAnsi(str: string): string {
  * Render a sleek OpenCode / Claude Code style status header block
  */
 export function renderAgentHeader(props: HeaderProps): void {
-  const termWidth = Math.min(Math.max(process.stdout.columns || 80, 70), 100);
-  const borderChar = "─";
-  const line = borderChar.repeat(termWidth - 2);
+  const termWidth = Math.min(Math.max(process.stdout.columns || 80, 70), 96);
+  const line = "─".repeat(termWidth - 2);
 
   const statusBadge = props.isConnected
     ? pc.bgGreen(pc.black(` ${figures.circleFilled} ONLINE `))
@@ -61,25 +68,43 @@ export function renderAgentHeader(props: HeaderProps): void {
 }
 
 /**
- * Render a high-tech tool execution card inspired by OpenCode
+ * Render dynamic Task List board (displayed above running agent logs)
  */
-export function renderToolCard(
-  tool: string,
-  argsStr: string,
-  agentId?: string,
-  thought?: string
-): void {
-  const prefix = agentId ? pc.bold(pc.magenta(`[${agentId}]`)) + " " : "";
-  const icon = getToolIcon(tool);
+export function renderTaskBoard(tasks: SubTaskItem[]): void {
+  if (!tasks || tasks.length === 0) return;
+
+  const termWidth = Math.min(Math.max(process.stdout.columns || 80, 60), 96);
+  const line = "─".repeat(termWidth - 4);
 
   console.log();
-  console.log(
-    ` ${figures.pointer} ${prefix}${pc.bold(pc.white(icon))} ${pc.bold(pc.cyan(tool))} ${pc.dim(argsStr)}`
-  );
+  console.log(pc.cyan(`  ┌─ ${pc.bold("TASK LIST")} ${line.slice(12)}┐`));
 
-  if (thought) {
-    console.log(pc.dim(`   ${figures.ellipsis} ${pc.italic(thought)}`));
+  for (const t of tasks) {
+    let icon = pc.dim(figures.circle);
+    let titleStr = pc.dim(t.title);
+
+    if (t.status === "running") {
+      icon = pc.yellow(figures.pointer);
+      titleStr = pc.bold(pc.yellow(t.title));
+    } else if (t.status === "completed") {
+      icon = pc.green(figures.tick);
+      titleStr = pc.green(t.title);
+    } else if (t.status === "failed") {
+      icon = pc.red(figures.cross);
+      titleStr = pc.red(t.title);
+    }
+
+    const agentTag = t.agentId ? pc.magenta(`[${t.agentId}] `) : "";
+    const detail = t.detail ? pc.dim(` — ${t.detail}`) : "";
+    const leftText = `  │  ${icon} ${agentTag}${titleStr}${detail}`;
+    const leftVisible = stringWidth(stripAnsi(leftText));
+    const pad = Math.max(1, termWidth - leftVisible - 2);
+
+    console.log(leftText + " ".repeat(pad) + pc.cyan("│"));
   }
+
+  console.log(pc.cyan(`  └${line}┘`));
+  console.log();
 }
 
 /**
@@ -117,8 +142,7 @@ export function getToolIcon(tool: string): string {
  */
 export function renderTaskCompleteCard(title: string, summary: string): void {
   const termWidth = Math.min(Math.max(process.stdout.columns || 80, 60), 90);
-  const borderChar = "─";
-  const line = borderChar.repeat(termWidth - 4);
+  const line = "─".repeat(termWidth - 4);
 
   console.log();
   console.log(pc.green(`  ╭─${line}╮`));
@@ -139,4 +163,3 @@ export function renderTaskCompleteCard(title: string, summary: string): void {
   console.log(pc.green(`  ╰─${line}╯`));
   console.log();
 }
-
