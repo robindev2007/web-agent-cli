@@ -201,6 +201,12 @@ Please inspect the work:
       p.note(reviewReport, pc.yellow("Reviewer Audit Report"));
     }
 
+    // Reclaim RAM: close completed sub-agent and reviewer tabs to keep Chrome lean
+    await Promise.allSettled([
+      (subAgent.loop.getProvider() as GeminiBrowserProvider).closeTab(),
+      this.reviewerProvider.closeTab(),
+    ]);
+
     return {
       motherPlan,
       subAgentWork: [{ id: subAgent.id, role: "Fullstack Coder", output: subAgentOutput }],
@@ -232,6 +238,8 @@ Please inspect the work:
           task.mission,
           createAgentReporter(agent.id, { showTurn: true })
         );
+        // Free Chrome RAM as soon as this sub-agent finishes its mission
+        await (agent.loop.getProvider() as GeminiBrowserProvider).closeTab().catch(() => {});
         return {
           id: agent.id,
           role: task.role,

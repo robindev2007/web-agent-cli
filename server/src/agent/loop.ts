@@ -36,6 +36,10 @@ export class AgentLoop {
     return this.workspace;
   }
 
+  public getProvider(): AIProvider {
+    return this.provider;
+  }
+
   /**
    * Parse tool_call block or batch array of tool calls from Gemini response
    */
