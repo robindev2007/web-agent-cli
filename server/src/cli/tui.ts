@@ -154,12 +154,38 @@ export function renderTaskCompleteCard(title: string, summary: string): void {
   );
   console.log(pc.green(`  ├─${line}┤`));
 
-  const lines = summary.trim().split(/\r?\n/);
-  for (const l of lines) {
-    const visible = stringWidth(stripAnsi(l));
-    const pad = Math.max(0, termWidth - visible - 6);
-    console.log(pc.green("  │ ") + pc.white(l) + " ".repeat(pad) + pc.green("│"));
+  const maxContentWidth = termWidth - 6;
+  const rawLines = summary.trim().split(/\r?\n/);
+  
+  for (const rawLine of rawLines) {
+    if (!rawLine.trim()) {
+      console.log(pc.green("  │ ") + " ".repeat(maxContentWidth) + pc.green("│"));
+      continue;
+    }
+
+    // Word wrap long lines to fit nicely in terminal card
+    const words = rawLine.split(/\s+/);
+    let currentLine = "";
+
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      if (stringWidth(stripAnsi(testLine)) <= maxContentWidth) {
+        currentLine = testLine;
+      } else {
+        if (currentLine) {
+          const pad = Math.max(0, maxContentWidth - stringWidth(stripAnsi(currentLine)));
+          console.log(pc.green("  │ ") + pc.white(currentLine) + " ".repeat(pad) + pc.green("│"));
+        }
+        currentLine = word;
+      }
+    }
+
+    if (currentLine) {
+      const pad = Math.max(0, maxContentWidth - stringWidth(stripAnsi(currentLine)));
+      console.log(pc.green("  │ ") + pc.white(currentLine) + " ".repeat(pad) + pc.green("│"));
+    }
   }
+
   console.log(pc.green(`  ╰─${line}╯`));
   console.log();
 }

@@ -439,7 +439,8 @@ export function createAgentReporter(
     },
     onTaskComplete(summary) {
       if (options?.showSummary) {
-        renderTaskCompleteCard("Mission Accomplished", summary);
+        const title = agentId === "solo" ? "Response" : "Mission Accomplished";
+        renderTaskCompleteCard(title, summary);
       }
     },
     onError(err) {
