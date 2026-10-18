@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import figures from "figures";
 import { resolve } from "node:path";
 import pc from "picocolors";
+import { AgentLoop } from "../agent/loop";
 import { MultiAgentOrchestrator } from "../agent/orchestrator";
 import { getPlatformInfo } from "../tools/workspace";
 import { createAgentReporter } from "./reporter";
