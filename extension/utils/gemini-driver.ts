@@ -77,17 +77,17 @@ export class GeminiDriver {
   /**
    * Click send button with low-latency polling & Enter key fallback
    */
+  /**
+   * High-speed click send with instant button click and low-latency Enter key trigger
+   */
   static async clickSend(): Promise<boolean> {
-    for (let i = 0; i < 30; i++) {
-      const sendBtn = this.getSendButton();
-      if (sendBtn && !sendBtn.disabled && sendBtn.getAttribute('aria-disabled') !== 'true') {
-        sendBtn.click();
-        return true;
-      }
-      await new Promise((r) => setTimeout(r, 40));
+    const sendBtn = this.getSendButton();
+    if (sendBtn && !sendBtn.disabled && sendBtn.getAttribute('aria-disabled') !== 'true') {
+      sendBtn.click();
+      return true;
     }
 
-    // Fallback: Dispatch Enter key
+    // Direct Enter key trigger
     const editor = this.getEditor();
     if (editor) {
       editor.dispatchEvent(
@@ -108,11 +108,19 @@ export class GeminiDriver {
           bubbles: true,
         })
       );
-      await new Promise((r) => setTimeout(r, 200));
-      if (this.isGenerating()) return true;
     }
 
-    return false;
+    for (let i = 0; i < 10; i++) {
+      const btn = this.getSendButton();
+      if (btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true') {
+        btn.click();
+        return true;
+      }
+      if (this.isGenerating()) return true;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    return this.isGenerating();
   }
 
   /**
@@ -123,12 +131,12 @@ export class GeminiDriver {
     // If Gemini is still generating from the previous turn, attempt to stop it
     if (this.isGenerating()) {
       this.stopGenerating();
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 150));
     }
 
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 10; i++) {
       if (!this.isGenerating()) break;
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 80));
     }
 
     if (this.isGenerating()) {
@@ -145,10 +153,10 @@ export class GeminiDriver {
   }
 
   /**
-   * Instant response completion detection via MutationObserver
+   * Instant response completion detection via MutationObserver with 50ms final settle
    */
   static async waitForResponse(
-    timeoutMs: number = 180000,
+    timeoutMs: number = 30000,
     onChunk?: (fullText: string, chunk: string) => void
   ): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -195,13 +203,13 @@ export class GeminiDriver {
           }
           emitChunkIfNew();
         } else if (generationDetected) {
-          // Streaming has finished, debounce 150ms for final render
+          // Ultra-fast settle: 50ms is plenty for DOM flush
           if (!settleTimer) {
             settleTimer = setTimeout(() => {
               observer.disconnect();
               const text = emitChunkIfNew();
               resolve(text);
-            }, 150);
+            }, 50);
           }
         }
       });
@@ -231,7 +239,7 @@ export class GeminiDriver {
           const text = emitChunkIfNew();
           resolve(text);
         }
-      }, 200);
+      }, 100);
     });
   }
 }

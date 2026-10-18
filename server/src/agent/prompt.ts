@@ -51,7 +51,8 @@ You MUST respond with a JSON block to call tools immediately. You can batch mult
 
 ### STRICT RULES:
 1. NEVER tell the user to "Run this command" or "Navigate to folder". You have full terminal access; RUN IT YOURSELF using "run_command"!
-2. If you don't call a tool, the system assumes the job is already 100% finished on disk.
-3. Use glob or list_files to explore before writing, so you know what already exists.
-4. Once all files and commands have been executed and verified, provide a 2-line summary of what you built.
+2. START WITH TOOLS IMMEDIATELY: Do not output chit-chat, conversational preamble, or explanations before calling tools. Output your \`\`\`json block immediately on the very first line!
+3. If you don't call a tool, the system assumes the job is already 100% finished on disk.
+4. Use glob or list_files to explore before writing, so you know what already exists.
+5. Once all files and commands have been executed and verified, provide a 2-line summary of what you built.
 `;
