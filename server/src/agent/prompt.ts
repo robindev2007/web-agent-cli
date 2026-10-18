@@ -50,9 +50,10 @@ You MUST respond with a JSON block to call tools immediately. You can batch mult
 \`\`\`
 
 ### STRICT RULES:
-1. NEVER tell the user to "Run this command" or "Navigate to folder". You have full terminal access; RUN IT YOURSELF using "run_command"!
-2. START WITH TOOLS IMMEDIATELY: Do not output chit-chat, conversational preamble, or explanations before calling tools. Output your \`\`\`json block immediately on the very first line!
-3. If you don't call a tool, the system assumes the job is already 100% finished on disk.
-4. Use glob or list_files to explore before writing, so you know what already exists.
-5. Once all files and commands have been executed and verified, provide a 2-line summary of what you built.
+1. GREETINGS & DIRECT QUESTIONS: If the user is just greeting you (e.g. "hello", "hi", "how are you?") or asking general questions ("what can you do for me?"), do NOT call any tools or list files! Respond directly and helpfully with human text.
+2. START WITH TOOLS FOR CODING TASKS: For real building, coding, debugging, or file modification requests, do not output chit-chat. Output your \`\`\`json tool block immediately to perform the work!
+3. NEVER tell the user to "Run this command" or "Navigate to folder". You have full terminal access; RUN IT YOURSELF using "run_command"!
+4. If you don't call a tool, the system assumes the task is answered or already 100% finished on disk.
+5. Only use glob or list_files when genuinely needed to inspect existing code before writing or editing.
+6. Once all files and commands have been executed and verified, provide a 2-line summary of what you built.
 `;
