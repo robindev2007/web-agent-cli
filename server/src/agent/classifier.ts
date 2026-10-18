@@ -56,6 +56,9 @@ const SINGLE_KEYWORDS = [
   "echo", "hello world",
   "simple script", "one file", "single file",
   "what is", "what are", "how many",
+  // Single-file documentation and writing
+  ".md", "readme", "documentation", "docs", "changelog", "license",
+  "write a file", "edit file", "update my", "how it looks",
 ];
 
 // ─── Scoring engine ───────────────────────────────────────────────────────────

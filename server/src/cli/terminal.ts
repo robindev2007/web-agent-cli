@@ -98,9 +98,10 @@ export async function startTerminalUI() {
     try {
       if (isParallel) {
         // Run parallel tasks across dedicated browser tabs at the exact same time
+        // Provide the overall userGoal context so each sub-agent knows what the project is about
         const parallelMissions = tasks.map((t, idx) => ({
-          role: `Coder ${idx + 1}`,
-          mission: t,
+          role: `Sub-Agent ${idx + 1}`,
+          mission: `OVERALL MISSION: "${goalText}"\n\nYOUR SPECIFIC SUB-TASK:\n${t}\n\nInspect the workspace files or execute tools directly on disk.`,
         }));
 
         // Update task board items to running
