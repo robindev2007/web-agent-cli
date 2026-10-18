@@ -68,7 +68,7 @@ export class GeminiBrowserProvider implements AIProvider {
 
     if (message.type === "GEMINI_RESPONSE") {
       request.resolve(message.text);
-    } else if (message.type === "TAB_RESET_SUCCESS") {
+    } else if (message.type === "TAB_RESET_SUCCESS" || message.type === "TAB_CLOSED_SUCCESS") {
       request.resolve(message.tabId ? String(message.tabId) : "OK");
     } else if (message.type === "ERROR") {
       request.reject(new Error(message.error || "Unknown error from extension"));
@@ -156,8 +156,8 @@ export class GeminiBrowserProvider implements AIProvider {
 
     // Stream stall watchdog: if no new tokens arrive for 25s, reject so the loop can recover
     const STALL_TIMEOUT_MS = 25_000;
-    // Allow up to 35s for initial Gemini response (fresh tabs take 5-10s to load & compile)
-    const INITIAL_RESPONSE_TIMEOUT_MS = 35_000;
+    // Allow up to 60s for initial Gemini response (fresh tabs take 5-10s to load & compile)
+    const INITIAL_RESPONSE_TIMEOUT_MS = 60_000;
     let streamStarted = false;
     let stallTimer: any = null;
     let initialTimer: any = null;

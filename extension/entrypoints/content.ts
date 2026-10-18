@@ -27,21 +27,31 @@ export default defineContentScript({
 
       if (message.type === 'GET_RESPONSE') {
         const timeoutMs = message.timeoutMs || 120000;
+        sendResponse({ success: true, started: true });
+
         GeminiDriver.waitForResponse(timeoutMs, (fullText, chunk) => {
           chrome.runtime.sendMessage({
             type: 'GEMINI_STREAM_CHUNK',
             requestId: message.requestId,
             chunk,
             fullText,
-          });
+          }).catch(() => {});
         })
           .then((text) => {
-            sendResponse({ success: true, text });
+            chrome.runtime.sendMessage({
+              type: 'GEMINI_RESPONSE_COMPLETE',
+              requestId: message.requestId,
+              text,
+            }).catch(() => {});
           })
           .catch((err) => {
-            sendResponse({ success: false, error: err.message });
+            chrome.runtime.sendMessage({
+              type: 'GEMINI_RESPONSE_ERROR',
+              requestId: message.requestId,
+              error: err.message,
+            }).catch(() => {});
           });
-        return true;
+        return false;
       }
     });
   },

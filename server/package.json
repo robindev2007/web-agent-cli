@@ -1,5 +1,5 @@
 {
-  "name": "gemini-bridge-server",
+  "name": "web-agent-cli",
   "module": "index.ts",
   "type": "module",
   "scripts": {

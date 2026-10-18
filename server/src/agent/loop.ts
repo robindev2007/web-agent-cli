@@ -214,16 +214,13 @@ export class AgentLoop {
         // If AI tab fails, freezes, or refuses new inputs, delete that tab immediately to free RAM, then retry!
         if (typeof (this.provider as any).resetTab === "function") {
           try {
-            console.log("\n\x1b[33m[AgentLoop] AI tab unresponsive or input failed. Deleting dead tab to free RAM & resuming...\x1b[0m\n");
-            if (typeof (this.provider as any).closeTab === "function") {
-              await (this.provider as any).closeTab().catch(() => {});
-            }
+            console.log("\n\x1b[33m[AgentLoop] Reconnecting session: creating clean browser tab...\x1b[0m\n");
             await (this.provider as any).resetTab();
             this.initializedSession = true;
-            const recoveryPrompt = `${AGENT_SYSTEM_PROMPT}\n\nUSER TASK:\n${userGoal}\n\n[RECOVERY FROM STUCK TAB]:\nThe previous browser tab was closed due to an error. Here is the current progress:\n${currentPrompt}\n\nResume execution immediately by calling tools.`;
+            const recoveryPrompt = `${AGENT_SYSTEM_PROMPT}\n\nUSER TASK:\n${userGoal}\n\n[RESUMED PROGRESS]:\n${currentPrompt}\n\nContinue execution now by calling tools.`;
             geminiResponse = await this.provider.sendPrompt(
               recoveryPrompt,
-              25000,
+              45000,
               (chunk, fullText) => callbacks?.onGeminiStream?.(chunk, fullText)
             );
           } catch (retryErr: any) {

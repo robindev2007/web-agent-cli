@@ -13,30 +13,40 @@ export class GeminiDriver {
   }
 
   static getSendButton(): HTMLButtonElement | null {
-    const btn =
-      document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]') ||
-      document.querySelector<HTMLButtonElement>('button.send-button') ||
-      document.querySelector<HTMLButtonElement>('.send-button button') ||
-      document.querySelector<HTMLButtonElement>('button[aria-label*="Send"]');
+    const selectors = [
+      'button[aria-label="Send message"]',
+      'button[aria-label*="Send" i]',
+      'button[aria-label*="send" i]',
+      'button.send-button',
+      '.send-button button',
+      'button:has(mat-icon[data-mat-icon-name="send"])',
+      'button:has(mat-icon[fonticon="send"])',
+      'button:has(mat-icon)',
+    ];
 
-    // Never return the stop button as the send button!
-    if (btn) {
-      const label = btn.getAttribute('aria-label') || '';
-      if (label.toLowerCase().includes('stop')) return null;
+    for (const sel of selectors) {
+      try {
+        const btn = document.querySelector<HTMLButtonElement>(sel);
+        if (btn) {
+          const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+          if (label.includes('stop')) continue;
+          return btn;
+        }
+      } catch {}
     }
-    return btn;
+    return null;
   }
 
   static isGenerating(): boolean {
     const stopBtn = document.querySelector(
-      'button[aria-label="Stop response"], button[aria-label*="Stop"]'
+      'button[aria-label="Stop response"], button[aria-label*="Stop" i]'
     );
     return !!stopBtn;
   }
 
   static stopGenerating(): boolean {
     const stopBtn = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Stop response"], button[aria-label*="Stop"]'
+      'button[aria-label="Stop response"], button[aria-label*="Stop" i]'
     );
     if (stopBtn) {
       stopBtn.click();
@@ -73,28 +83,34 @@ export class GeminiDriver {
       inserted = true;
     }
 
-    editor.dispatchEvent(new Event('beforeinput', { bubbles: true }));
-    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    try {
+      editor.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: text }));
+      editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    } catch {
+      editor.dispatchEvent(new Event('beforeinput', { bubbles: true }));
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     editor.dispatchEvent(new Event('change', { bubbles: true }));
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
 
     return inserted;
   }
 
   /**
-   * Click send button with low-latency polling & Enter key fallback
-   */
-  /**
-   * High-speed click send with instant button click and low-latency Enter key trigger
+   * High-speed click send with button click and Enter key trigger
    */
   static async clickSend(): Promise<boolean> {
+    const editor = this.getEditor();
+
+    // 1. Click send button directly if found
     const sendBtn = this.getSendButton();
-    if (sendBtn && !sendBtn.disabled && sendBtn.getAttribute('aria-disabled') !== 'true') {
+    if (sendBtn) {
+      sendBtn.removeAttribute('disabled');
+      sendBtn.setAttribute('aria-disabled', 'false');
       sendBtn.click();
-      return true;
     }
 
-    // Direct Enter key trigger
-    const editor = this.getEditor();
+    // 2. Dispatch Enter key to trigger submit
     if (editor) {
       editor.dispatchEvent(
         new KeyboardEvent('keydown', {
@@ -116,17 +132,19 @@ export class GeminiDriver {
       );
     }
 
-    for (let i = 0; i < 10; i++) {
-      const btn = this.getSendButton();
-      if (btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true') {
-        btn.click();
-        return true;
-      }
+    // 3. Short poll (up to 1.5s) to check if generation started or editor cleared
+    for (let i = 0; i < 15; i++) {
       if (this.isGenerating()) return true;
-      await new Promise((r) => setTimeout(r, 25));
+      if (editor && !editor.innerText.trim()) return true;
+
+      const currentBtn = this.getSendButton();
+      if (currentBtn && !currentBtn.disabled && currentBtn.getAttribute('aria-disabled') !== 'true') {
+        currentBtn.click();
+      }
+      await new Promise((r) => setTimeout(r, 100));
     }
 
-    return this.isGenerating();
+    return true;
   }
 
   /**
@@ -149,9 +167,7 @@ export class GeminiDriver {
     const typed = await this.setPromptText(text);
     if (!typed) return { success: false, error: 'Failed to type prompt into editor.' };
 
-    const sent = await this.clickSend();
-    if (!sent) return { success: false, error: 'Send button was not enabled or found.' };
-
+    await this.clickSend();
     return { success: true };
   }
 
@@ -159,14 +175,13 @@ export class GeminiDriver {
    * Instant response completion detection via MutationObserver with 50ms final settle
    */
   static async waitForResponse(
-    timeoutMs: number = 30000,
+    timeoutMs: number = 35000,
     onChunk?: (fullText: string, chunk: string) => void
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
       let generationDetected = false;
       let settleTimer: any = null;
-      let lastLength = 0;
 
       const extractFinalText = () => {
         const elements = document.querySelectorAll('message-content, model-response, .model-response-text');
@@ -179,6 +194,10 @@ export class GeminiDriver {
         }
         return '';
       };
+
+      const initialText = extractFinalText();
+      const initialLength = initialText.length;
+      let lastLength = initialLength;
 
       const emitChunkIfNew = () => {
         const current = extractFinalText();
@@ -195,26 +214,31 @@ export class GeminiDriver {
         document.querySelector('chat-window') ||
         document.body;
 
-      const observer = new MutationObserver(() => {
+      const checkCompletion = () => {
         const generating = this.isGenerating();
+        const current = emitChunkIfNew();
 
-        if (generating) {
+        if (generating || current.length > initialLength) {
           generationDetected = true;
-          if (settleTimer) {
-            clearTimeout(settleTimer);
-            settleTimer = null;
-          }
-          emitChunkIfNew();
-        } else if (generationDetected) {
-          // Ultra-fast settle: 50ms is plenty for DOM flush
+        }
+
+        if (generationDetected && !generating) {
           if (!settleTimer) {
             settleTimer = setTimeout(() => {
               observer.disconnect();
+              clearInterval(watchdog);
               const text = emitChunkIfNew();
-              resolve(text);
-            }, 50);
+              resolve(text || current);
+            }, 150);
           }
+        } else if (generating && settleTimer) {
+          clearTimeout(settleTimer);
+          settleTimer = null;
         }
+      };
+
+      const observer = new MutationObserver(() => {
+        checkCompletion();
       });
 
       observer.observe(targetNode, {
@@ -228,20 +252,16 @@ export class GeminiDriver {
         if (Date.now() - startTime > timeoutMs) {
           clearInterval(watchdog);
           observer.disconnect();
-          reject(new Error('Timeout waiting for Gemini response.'));
+          const current = emitChunkIfNew();
+          if (current.length > initialLength) {
+            resolve(current);
+          } else {
+            reject(new Error('Timeout waiting for Gemini response.'));
+          }
           return;
         }
 
-        const generating = this.isGenerating();
-        if (generating) {
-          generationDetected = true;
-          emitChunkIfNew();
-        } else if (generationDetected) {
-          clearInterval(watchdog);
-          observer.disconnect();
-          const text = emitChunkIfNew();
-          resolve(text);
-        }
+        checkCompletion();
       }, 100);
     });
   }

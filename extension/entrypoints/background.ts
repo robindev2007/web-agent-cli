@@ -55,7 +55,7 @@ export default defineBackground(() => {
           resolved = true;
           chrome.tabs.onUpdated.removeListener(listener);
           clearTimeout(fallbackTimer);
-          setTimeout(resolve, 2500); // Allow Gemini client app to mount
+          setTimeout(resolve, 1500); // Allow Gemini client app to mount
         }
       };
 
@@ -67,7 +67,7 @@ export default defineBackground(() => {
       chrome.tabs.onUpdated.addListener(listener);
 
       // Timeout fallback in case 'complete' event was missed or delayed
-      const fallbackTimer = setTimeout(done, 12000);
+      const fallbackTimer = setTimeout(done, 8000);
     });
 
     // Ensure content script is injected
@@ -220,51 +220,14 @@ export default defineBackground(() => {
                   `[Multi-Agent] Prompt delivery failed for "${agentId}" on tab ${tabId}: ${errorReason}`,
                 );
 
-                if (!isRetry) {
-                  console.log(
-                    `%c[Multi-Agent] Tab unresponsive. Closing tab ${tabId} and spawning a fresh tab for "${agentId}"...`,
-                    "color: #f59e0b; font-weight: bold;",
-                  );
-
-                  socket?.send(
-                    JSON.stringify({
-                      type: "STATUS",
-                      message: `AI tab failed for agent ${agentId} (${errorReason}). Created fresh tab and retrying...`,
-                    }),
-                  );
-
-                  socket?.send(
-                    JSON.stringify({
-                      type: "TAB_RESET",
-                      agentId,
-                      reason: errorReason,
-                    }),
-                  );
-
-                  try {
-                    const freshTabId = await createFreshTabForAgent(agentId);
-                    await sendPromptWithAutoRecovery(freshTabId, true);
-                  } catch (freshErr: any) {
-                    socket?.send(
-                      JSON.stringify({
-                        id: data.id,
-                        agentId,
-                        type: "ERROR",
-                        error: `Failed to create fresh tab: ${freshErr.message}`,
-                      }),
-                    );
-                  }
-                } else {
-                  // Already tried on fresh tab
-                  socket?.send(
-                    JSON.stringify({
-                      id: data.id,
-                      agentId,
-                      type: "ERROR",
-                      error: `Failed even after fresh tab creation: ${errorReason}`,
-                    }),
-                  );
-                }
+                socket?.send(
+                  JSON.stringify({
+                    id: data.id,
+                    agentId,
+                    type: "ERROR",
+                    error: errorReason,
+                  }),
+                );
               };
 
               // 1. Check content script availability
@@ -299,6 +262,7 @@ export default defineBackground(() => {
                     }
 
                     // 3. Extract Response with real-time stream relay
+                    pendingRequests.set(data.id, agentId);
                     chrome.tabs.sendMessage(
                       tabId,
                       { type: "GET_RESPONSE", requestId: data.id, timeoutMs: 120000 },
@@ -307,9 +271,19 @@ export default defineBackground(() => {
                           const respErr =
                             respResult?.error ||
                             chrome.runtime.lastError?.message ||
-                            "Error extracting Gemini response";
-                          await triggerTabRecovery(respErr);
-                        } else {
+                            "Error starting response extraction";
+                          pendingRequests.delete(data.id);
+                          socket?.send(
+                            JSON.stringify({
+                              id: data.id,
+                              agentId,
+                              type: "ERROR",
+                              error: respErr,
+                            }),
+                          );
+                        } else if (respResult.text) {
+                          // Immediate text already available
+                          pendingRequests.delete(data.id);
                           socket?.send(
                             JSON.stringify({
                               id: data.id,
@@ -363,6 +337,9 @@ export default defineBackground(() => {
     }
   }
 
+  // Track in-flight request IDs -> agentId
+  const pendingRequests = new Map<string, string>();
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === "GEMINI_STREAM_CHUNK") {
       if (socket && socket.readyState === WebSocket.OPEN) {
@@ -372,6 +349,38 @@ export default defineBackground(() => {
             type: "GEMINI_STREAM",
             chunk: msg.chunk,
             fullText: msg.fullText,
+          }),
+        );
+      }
+      return;
+    }
+
+    if (msg.type === "GEMINI_RESPONSE_COMPLETE") {
+      const agentId = pendingRequests.get(msg.requestId) || "mother";
+      pendingRequests.delete(msg.requestId);
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(
+          JSON.stringify({
+            id: msg.requestId,
+            agentId,
+            type: "GEMINI_RESPONSE",
+            text: msg.text,
+          }),
+        );
+      }
+      return;
+    }
+
+    if (msg.type === "GEMINI_RESPONSE_ERROR") {
+      const agentId = pendingRequests.get(msg.requestId) || "mother";
+      pendingRequests.delete(msg.requestId);
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(
+          JSON.stringify({
+            id: msg.requestId,
+            agentId,
+            type: "ERROR",
+            error: msg.error,
           }),
         );
       }
