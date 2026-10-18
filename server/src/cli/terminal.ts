@@ -139,26 +139,7 @@ export async function startTerminalUI() {
 
     console.log();
 
-    // ── Clean prompt loop (Ready for next input always at the bottom) ─────
-    const again = await p.confirm({
-      message: pc.bold("Ready for next coding task?"),
-      initialValue: true,
-    });
-
-    if (p.isCancel(again) || !again) {
-      p.outro(pc.dim("Session ended. All work saved to workspace."));
-      process.exit(0);
-    }
-
-    console.clear();
-    renderAgentHeader({
-      title: "GEMINI AGENT SYSTEM",
-      version: "2.1.0",
-      platform: platform.toUpperCase(),
-      shell,
-      workspace: rootWorkspace,
-      statusText: "Ready",
-      isConnected: mother.isReady(),
-    });
+    // Seamless continuous loop: Never ask 'Ready for next coding task?'
+    // The previous history remains in the terminal, and the next input appears immediately at the bottom.
   }
 }
