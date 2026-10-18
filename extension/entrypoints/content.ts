@@ -11,6 +11,11 @@ export default defineContentScript({
 
     // Listen for messages from extension popup / side panel / background
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message.type === 'PING') {
+        sendResponse({ success: true, pong: true });
+        return false;
+      }
+
       if (message.type === 'SEND_PROMPT') {
         GeminiDriver.sendPrompt(message.prompt).then(res => {
           sendResponse(res);
@@ -21,7 +26,7 @@ export default defineContentScript({
       }
 
       if (message.type === 'GET_RESPONSE') {
-        const timeoutMs = message.timeoutMs || 30000;
+        const timeoutMs = message.timeoutMs || 120000;
         GeminiDriver.waitForResponse(timeoutMs, (fullText, chunk) => {
           chrome.runtime.sendMessage({
             type: 'GEMINI_STREAM_CHUNK',

@@ -140,6 +140,12 @@ export class GeminiDriver {
       await new Promise((r) => setTimeout(r, 100));
     }
 
+    // Wait for editor element to appear in DOM (critical for newly opened tabs)
+    for (let i = 0; i < 30; i++) {
+      if (this.getEditor()) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
     const typed = await this.setPromptText(text);
     if (!typed) return { success: false, error: 'Failed to type prompt into editor.' };
 

@@ -154,9 +154,10 @@ export class GeminiBrowserProvider implements AIProvider {
 
     const id = Math.random().toString(36).substring(2, 9);
 
-    // Stream stall watchdog: if no new tokens arrive for 12s, reject so the loop can recover immediately
-    const STALL_TIMEOUT_MS = 12_000;
-    const INITIAL_RESPONSE_TIMEOUT_MS = 15_000;
+    // Stream stall watchdog: if no new tokens arrive for 25s, reject so the loop can recover
+    const STALL_TIMEOUT_MS = 25_000;
+    // Allow up to 35s for initial Gemini response (fresh tabs take 5-10s to load & compile)
+    const INITIAL_RESPONSE_TIMEOUT_MS = 35_000;
     let streamStarted = false;
     let stallTimer: any = null;
     let initialTimer: any = null;

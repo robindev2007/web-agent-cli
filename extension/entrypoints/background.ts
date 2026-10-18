@@ -47,15 +47,27 @@ export default defineBackground(() => {
     const tabId = newTab.id!;
     agentTabs.set(agentId, tabId);
 
-    // Wait for the new tab to finish loading
+    // Wait for the new tab to finish loading (with 15s max timeout to prevent hang)
     await new Promise<void>((resolve) => {
+      let resolved = false;
+      const done = () => {
+        if (!resolved) {
+          resolved = true;
+          chrome.tabs.onUpdated.removeListener(listener);
+          clearTimeout(fallbackTimer);
+          setTimeout(resolve, 2500); // Allow Gemini client app to mount
+        }
+      };
+
       const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
         if (id === tabId && info.status === "complete") {
-          chrome.tabs.onUpdated.removeListener(listener);
-          setTimeout(resolve, 2000);
+          done();
         }
       };
       chrome.tabs.onUpdated.addListener(listener);
+
+      // Timeout fallback in case 'complete' event was missed or delayed
+      const fallbackTimer = setTimeout(done, 12000);
     });
 
     // Ensure content script is injected
@@ -64,7 +76,7 @@ export default defineBackground(() => {
         target: { tabId },
         files: ["content-scripts/content.js"],
       });
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 500));
     } catch (e: any) {
       console.warn(`[Multi-Agent] Script injection note: ${e.message}`);
     }
@@ -289,7 +301,7 @@ export default defineBackground(() => {
                     // 3. Extract Response with real-time stream relay
                     chrome.tabs.sendMessage(
                       tabId,
-                      { type: "GET_RESPONSE", requestId: data.id },
+                      { type: "GET_RESPONSE", requestId: data.id, timeoutMs: 120000 },
                       async (respResult) => {
                         if (chrome.runtime.lastError || !respResult?.success) {
                           const respErr =
