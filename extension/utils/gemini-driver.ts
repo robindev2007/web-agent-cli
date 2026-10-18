@@ -13,12 +13,18 @@ export class GeminiDriver {
   }
 
   static getSendButton(): HTMLButtonElement | null {
-    return (
-      document.querySelector('button[aria-label="Send message"]') ||
-      document.querySelector('button[aria-label*="Send"]') ||
-      document.querySelector('button.send-button') ||
-      document.querySelector('.send-button button')
-    );
+    const btn =
+      document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]') ||
+      document.querySelector<HTMLButtonElement>('button.send-button') ||
+      document.querySelector<HTMLButtonElement>('.send-button button') ||
+      document.querySelector<HTMLButtonElement>('button[aria-label*="Send"]');
+
+    // Never return the stop button as the send button!
+    if (btn) {
+      const label = btn.getAttribute('aria-label') || '';
+      if (label.toLowerCase().includes('stop')) return null;
+    }
+    return btn;
   }
 
   static isGenerating(): boolean {
@@ -124,23 +130,14 @@ export class GeminiDriver {
   }
 
   /**
-   * Send prompt with smart auto-wait & recovery:
-   * If Gemini is currently generating or locked from previous turns, stop it and wait.
+   * Send prompt with clean auto-wait:
+   * If Gemini is currently generating, wait for it to finish naturally without clicking Stop.
    */
   static async sendPrompt(text: string): Promise<{ success: boolean; error?: string }> {
-    // If Gemini is still generating from the previous turn, attempt to stop it
-    if (this.isGenerating()) {
-      this.stopGenerating();
-      await new Promise((r) => setTimeout(r, 150));
-    }
-
-    for (let i = 0; i < 10; i++) {
+    // Wait for any previous turn to finish naturally (do NOT click stop!)
+    for (let i = 0; i < 20; i++) {
       if (!this.isGenerating()) break;
-      await new Promise((r) => setTimeout(r, 80));
-    }
-
-    if (this.isGenerating()) {
-      return { success: false, error: 'Gemini took too long to finish previous response.' };
+      await new Promise((r) => setTimeout(r, 100));
     }
 
     const typed = await this.setPromptText(text);
