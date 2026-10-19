@@ -59,54 +59,79 @@ export function parseToolCallsFromResponse(rawText: string): {
   const toolCalls: OpenAIToolCall[] = [];
   let cleanContent = rawText;
 
-  // 1. Match Gemini/OpenCode CLI syntax:
-  // [tool_call: bash for 'npx create-next-app...' working_dir='D:/robin']
-  // or tool_call: bash for '...'
-  const bashForRegex = /\[?tool_call:\s*([a-zA-Z0-9_\-]+)\s+for\s+['"]([\s\S]*?)['"](?:\s+working_dir=['"]([\s\S]*?)['"])?\]?/gi;
+  // 1. Match line-based tool_call syntax (including multi-parameter calls):
+  // tool_call: glob for pattern '*' path 'C:\Users\Robin\AppData\Local\Temp\opencode'
+  // [tool_call: bash for 'systeminfo']
+  // tool_call: bash for 'npx create-next-app@latest hellp-js' working_dir='D:/robin'
+  const lineRegex = /\[?tool_call:\s*([a-zA-Z0-9_\-]+)(?:\s+for)?\s+([^\r\n\]]+)\]?/gi;
   let match: RegExpExecArray | null;
-  while ((match = bashForRegex.exec(cleanContent)) !== null) {
+  while ((match = lineRegex.exec(cleanContent)) !== null) {
+    const fullMatch = match[0];
     const toolName = match[1];
-    let command = match[2];
-    const workingDir = match[3];
+    const rest = match[2].trim();
 
-    // Ensure npx has -y so non-interactive execution never hangs on prompt
-    if (command.startsWith("npx ") && !command.includes(" -y ") && !command.startsWith("npx -y ")) {
-      command = command.replace(/^npx\s+/, "npx -y ");
+    // Check if rest is JSON inline
+    if (rest.startsWith("{") && rest.endsWith("}")) {
+      try {
+        const parsed = JSON.parse(rest);
+        toolCalls.push({
+          id: `call_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+          type: "function",
+          function: {
+            name: toolName,
+            arguments: JSON.stringify(parsed),
+          },
+        });
+        cleanContent = cleanContent.replace(fullMatch, "").trim();
+        continue;
+      } catch {}
     }
 
-    const args: Record<string, any> = { command };
-    if (workingDir) {
-      args.working_dir = workingDir;
+    const args: Record<string, any> = {};
+    const paramRegex = /(?:([a-zA-Z0-9_\-]+)(?:[=\s]+))?(?:'([^']*)'|"([^"]*)")/g;
+    let pm: RegExpExecArray | null;
+    const positional: string[] = [];
+
+    while ((pm = paramRegex.exec(rest)) !== null) {
+      const key = pm[1];
+      const val = pm[2] !== undefined ? pm[2] : pm[3];
+      if (key) {
+        args[key] = val;
+      } else {
+        positional.push(val);
+      }
     }
 
-    toolCalls.push({
-      id: `call_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
-      type: "function",
-      function: {
-        name: toolName,
-        arguments: JSON.stringify(args),
-      },
-    });
+    if (positional.length > 0) {
+      if (toolName === "bash" || toolName === "terminal" || toolName === "exec") {
+        args["command"] = positional[0];
+      } else if (toolName === "read" || toolName === "write" || toolName === "view") {
+        args["path"] = positional[0];
+      } else if (toolName === "glob") {
+        args["pattern"] = positional[0];
+      } else {
+        args["input"] = positional[0];
+      }
+    }
 
-    cleanContent = cleanContent.replace(match[0], "").trim();
-  }
+    if (args.command && typeof args.command === "string") {
+      if (args.command.startsWith("npx ") && !args.command.includes(" -y ") && !args.command.startsWith("npx -y ")) {
+        args.command = args.command.replace(/^npx\s+/, "npx -y ");
+      }
+    }
 
-  // 2. Match tool_call: toolName {"command": ...}
-  const toolCallJsonInline = /\[?tool_call:\s*([a-zA-Z0-9_\-]+)\s+(\{[\s\S]*?\})\]?/gi;
-  while ((match = toolCallJsonInline.exec(cleanContent)) !== null) {
-    const toolName = match[1];
-    try {
-      const parsedArgs = JSON.parse(match[2]);
+    if (Object.keys(args).length > 0) {
       toolCalls.push({
         id: `call_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
         type: "function",
         function: {
           name: toolName,
-          arguments: typeof parsedArgs === "string" ? parsedArgs : JSON.stringify(parsedArgs),
+          arguments: JSON.stringify(args),
         },
       });
-      cleanContent = cleanContent.replace(match[0], "").trim();
-    } catch {}
+
+      cleanContent = cleanContent.replace(fullMatch, "").trim();
+    }
   }
 
   // 3. Match JSON code blocks: ```tool_call ... ``` or ```json ... ```

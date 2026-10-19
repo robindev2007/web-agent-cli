@@ -102,6 +102,18 @@ describe("OpenCode Adapter — Tool Call Parsing", () => {
     expect(cleanContent).toContain("I will create the app now.");
   });
 
+  it("parses multi-parameter tool calls such as glob with pattern and path", () => {
+    const raw = "tool_call: glob for pattern '*' path 'C:\\Users\\Robin\\AppData\\Local\\Temp\\opencode'";
+    const { cleanContent, toolCalls } = parseToolCallsFromResponse(raw);
+
+    expect(toolCalls.length).toBe(1);
+    expect(toolCalls[0].function.name).toBe("glob");
+    const args = JSON.parse(toolCalls[0].function.arguments);
+    expect(args.pattern).toBe("*");
+    expect(args.path).toBe("C:\\Users\\Robin\\AppData\\Local\\Temp\\opencode");
+    expect(cleanContent).toBe("");
+  });
+
   it("parses markdown json tool_call blocks", () => {
     const raw = "```tool_call\n{\"name\": \"bash\", \"arguments\": {\"command\": \"wmic computersystem get totalphysicalmemory\"}}\n```";
     const { cleanContent, toolCalls } = parseToolCallsFromResponse(raw);
