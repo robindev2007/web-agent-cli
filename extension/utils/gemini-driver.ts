@@ -212,10 +212,13 @@ export class GeminiDriver {
     if (!el) return '';
     const clone = el.cloneNode(true) as HTMLElement;
     const junk = clone.querySelectorAll(
-      '.search-queries, .grounding-carousel, .attribution-container, .citation, button, mat-icon, .actions-container'
+      '.search-queries, .grounding-carousel, .attribution-container, .citation, button, mat-icon, .actions-container, .code-block-decoration, .code-header, [class*="code-header"], [class*="code-block-decoration"]'
     );
     junk.forEach((j) => j.remove());
-    return clone.innerText.trim();
+    let text = clone.innerText.trim();
+    // Strip UI code block header artifacts if any leaked into text
+    text = text.replace(/^Code snippet\s*/gim, '').replace(/^Copy code\s*/gim, '').trim();
+    return text;
   }
 
   static lastResponseCount: number = 0;

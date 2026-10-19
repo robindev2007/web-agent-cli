@@ -114,6 +114,29 @@ describe("OpenCode Adapter — Tool Call Parsing", () => {
     expect(cleanContent).toBe("");
   });
 
+  it("parses code blocks preceded by UI 'Code snippet' text", () => {
+    const raw = 'Code snippet{"name": "glob", "arguments": {"path": "C:\\\\Users\\\\Robin\\\\AppData\\\\Local\\\\Temp\\\\opencode", "pattern": "*"}}';
+    const { cleanContent, toolCalls } = parseToolCallsFromResponse(raw);
+
+    expect(toolCalls.length).toBe(1);
+    expect(toolCalls[0].function.name).toBe("glob");
+    const args = JSON.parse(toolCalls[0].function.arguments);
+    expect(args.pattern).toBe("*");
+    expect(args.path).toContain("opencode");
+    expect(cleanContent).toBe("");
+  });
+
+  it("parses bare nested JSON tool calls from DOM", () => {
+    const raw = 'I will run this tool now:\n\n{"name": "bash", "arguments": {"command": "systeminfo"}}';
+    const { cleanContent, toolCalls } = parseToolCallsFromResponse(raw);
+
+    expect(toolCalls.length).toBe(1);
+    expect(toolCalls[0].function.name).toBe("bash");
+    const args = JSON.parse(toolCalls[0].function.arguments);
+    expect(args.command).toBe("systeminfo");
+    expect(cleanContent).toBe("I will run this tool now:");
+  });
+
   it("parses markdown json tool_call blocks", () => {
     const raw = "```tool_call\n{\"name\": \"bash\", \"arguments\": {\"command\": \"wmic computersystem get totalphysicalmemory\"}}\n```";
     const { cleanContent, toolCalls } = parseToolCallsFromResponse(raw);

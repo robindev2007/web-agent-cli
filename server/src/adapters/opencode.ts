@@ -50,6 +50,58 @@ export interface ChatCompletionRequest {
 }
 
 /**
+ * Extracts balanced JSON objects from text
+ */
+export function extractBalancedJson(text: string): { jsonStr: string; startIndex: number; endIndex: number }[] {
+  const results: { jsonStr: string; startIndex: number; endIndex: number }[] = [];
+  let depth = 0;
+  let startIndex = -1;
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (char === "\\") {
+        escape = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      if (depth === 0) {
+        startIndex = i;
+      }
+      depth++;
+    } else if (char === "}") {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && startIndex !== -1) {
+          results.push({
+            jsonStr: text.slice(startIndex, i + 1),
+            startIndex,
+            endIndex: i + 1,
+          });
+          startIndex = -1;
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
  * Parses tool calls formatted by Gemini into structured OpenAI tool calls
  */
 export function parseToolCallsFromResponse(rawText: string): {
@@ -57,7 +109,10 @@ export function parseToolCallsFromResponse(rawText: string): {
   toolCalls: OpenAIToolCall[];
 } {
   const toolCalls: OpenAIToolCall[] = [];
-  let cleanContent = rawText;
+  let cleanContent = rawText
+    .replace(/Code snippet\s*/gi, "")
+    .replace(/Copy code\s*/gi, "")
+    .trim();
 
   // 1. Match line-based tool_call syntax (including multi-parameter calls):
   // tool_call: glob for pattern '*' path 'C:\Users\Robin\AppData\Local\Temp\opencode'
@@ -134,15 +189,15 @@ export function parseToolCallsFromResponse(rawText: string): {
     }
   }
 
-  // 3. Match JSON code blocks: ```tool_call ... ``` or ```json ... ```
-  const jsonBlockRegex = /```(?:tool_call|json)?\s*\n?(\{\s*[\s\S]*?"(?:name|tool)"\s*:[\s\S]*?\})\s*```/gi;
-  while ((match = jsonBlockRegex.exec(cleanContent)) !== null) {
+  // 2. Match balanced JSON objects (fenced in markdown code blocks or bare from DOM)
+  const jsonBlocks = extractBalancedJson(cleanContent);
+  for (const block of jsonBlocks) {
     try {
-      const parsed = JSON.parse(match[1]);
+      const parsed = JSON.parse(block.jsonStr);
       const toolName = parsed.name || parsed.tool;
-      const rawArgs = parsed.arguments || parsed.args || parsed.params || parsed.parameters || parsed;
-      let argsObj: Record<string, any> = {};
+      const rawArgs = parsed.arguments || parsed.args || parsed.params || parsed.parameters;
 
+      let argsObj: Record<string, any> = {};
       if (typeof rawArgs === "string") {
         try {
           argsObj = JSON.parse(rawArgs);
@@ -151,11 +206,11 @@ export function parseToolCallsFromResponse(rawText: string): {
         }
       } else if (typeof rawArgs === "object" && rawArgs !== null) {
         argsObj = { ...rawArgs };
-        delete argsObj.name;
-        delete argsObj.tool;
+      } else if (parsed.command) {
+        argsObj = { command: parsed.command, ...(parsed.working_dir ? { working_dir: parsed.working_dir } : {}) };
       }
 
-      if (toolName && typeof toolName === "string") {
+      if (toolName && typeof toolName === "string" && Object.keys(argsObj).length > 0) {
         if (argsObj.command && typeof argsObj.command === "string") {
           if (argsObj.command.startsWith("npx ") && !argsObj.command.includes(" -y ") && !argsObj.command.startsWith("npx -y ")) {
             argsObj.command = argsObj.command.replace(/^npx\s+/, "npx -y ");
@@ -171,12 +226,12 @@ export function parseToolCallsFromResponse(rawText: string): {
           },
         });
 
-        cleanContent = cleanContent.replace(match[0], "").trim();
+        cleanContent = cleanContent.replace(block.jsonStr, "").replace(/```(?:json|tool_call)?/g, "").trim();
       }
     } catch {}
   }
 
-  // 4. Match XML tag: <tool_call> ... </tool_call>
+  // 3. Match XML tag: <tool_call> ... </tool_call>
   const xmlTagRegex = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
   while ((match = xmlTagRegex.exec(cleanContent)) !== null) {
     try {
@@ -261,7 +316,22 @@ export function formatMessagesForGemini(
       let part = text ? `[ASSISTANT]:\n${text}` : "";
       if (m.tool_calls && m.tool_calls.length > 0) {
         const calls = m.tool_calls
-          .map((tc) => `tool_call: ${tc.function?.name || "tool"} for '${tc.function?.arguments || ""}'`)
+          .map((tc) => {
+            const toolName = tc.function?.name || "tool";
+            const argsStr = tc.function?.arguments || "";
+            try {
+              const parsed = JSON.parse(argsStr);
+              if (parsed.command) {
+                return `[tool_call: ${toolName} for '${parsed.command}'${parsed.working_dir ? ` working_dir='${parsed.working_dir}'` : ""}]`;
+              }
+              const formattedArgs = Object.entries(parsed)
+                .map(([k, v]) => `${k}='${v}'`)
+                .join(" ");
+              return `[tool_call: ${toolName} for ${formattedArgs}]`;
+            } catch {
+              return `[tool_call: ${toolName} for '${argsStr}']`;
+            }
+          })
           .join("\n");
         part = part ? `${part}\n${calls}` : `[ASSISTANT]:\n${calls}`;
       }
@@ -459,7 +529,7 @@ export async function handleOpenCodeRequest(
                   safeEnqueue(`data: ${JSON.stringify(sseData)}\n\n`);
                 } else {
                   // Tools enabled: hold back stream if tool call marker detected
-                  const toolMarker = fullResponseText.search(/\[?tool_call:|```(?:tool_call|json)?|<tool_call/i);
+                  const toolMarker = fullResponseText.search(/\[?tool_call:|```(?:tool_call|json)?|<tool_call|Code snippet|\{\s*"name"\s*:/i);
                   if (toolMarker === -1) {
                     if (fullResponseText.length > streamedIndex) {
                       const deltaText = fullResponseText.slice(streamedIndex);
