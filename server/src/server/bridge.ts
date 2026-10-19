@@ -1,3 +1,5 @@
+import { CONFIG } from "../config";
+import type { GeminiBrowserProvider } from "../providers";
 import { handleOpenCodeRequest } from "../adapters/opencode";
 
 export function createBridgeServer(provider: GeminiBrowserProvider) {
