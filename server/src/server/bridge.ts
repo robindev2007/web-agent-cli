@@ -1,17 +1,29 @@
-import { CONFIG } from "../config";
-import type { GeminiBrowserProvider } from "../providers";
+import { handleOpenCodeRequest } from "../adapters/opencode";
 
 export function createBridgeServer(provider: GeminiBrowserProvider) {
   const server = Bun.serve({
     port: CONFIG.SERVER.PORT,
     hostname: CONFIG.SERVER.HOST,
-    fetch(req, server) {
+    async fetch(req, server) {
       const url = new URL(req.url);
+
+      // WebSocket Upgrade for Chrome Extension
       if (url.pathname === CONFIG.SERVER.WS_PATH || req.headers.get("upgrade") === "websocket") {
         const upgraded = server.upgrade(req);
         if (upgraded) return undefined;
       }
-      return new Response(`Gemini Bridge Server running on http://${CONFIG.SERVER.HOST}:${CONFIG.SERVER.PORT}`);
+
+      // OpenCode Adapter (OpenAI-Compatible /v1/models and /v1/chat/completions)
+      const opencodeResponse = await handleOpenCodeRequest(req, provider);
+      if (opencodeResponse) return opencodeResponse;
+
+      return new Response(
+        `⚡ web-agent-cli Bridge Server running on http://${CONFIG.SERVER.HOST}:${CONFIG.SERVER.PORT}\n` +
+        `• Chrome Extension WebSocket: ws://${CONFIG.SERVER.HOST}:${CONFIG.SERVER.PORT}${CONFIG.SERVER.WS_PATH}\n` +
+        `• OpenCode Adapter Endpoint: http://${CONFIG.SERVER.HOST}:${CONFIG.SERVER.PORT}/v1/chat/completions\n` +
+        `• Status: ${provider.isReady() ? "ONLINE (Chrome connected)" : "WAITING_CHROME"}\n`,
+        { headers: { "Content-Type": "text/plain; charset=utf-8" } }
+      );
     },
     websocket: {
       open(ws) {

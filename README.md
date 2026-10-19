@@ -73,5 +73,49 @@ bun test
 
 ---
 
+## 🔌 OpenCode Adapter Integration
+
+`web-agent-cli` includes a built-in **OpenCode / OpenAI-compatible adapter** on `http://127.0.0.1:3000/v1` supporting real-time streaming completions and model discovery.
+
+### Use with OpenCode CLI / IDE Extension
+
+1. Ensure the `web-agent-cli` server is running (`cd server && bun run dev`).
+2. Add or copy the [`opencode.json`](opencode.json) to your project root or `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "web-agent/gemini-browser",
+  "providers": {
+    "web-agent": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Web Agent CLI (Gemini Browser)",
+      "options": {
+        "baseURL": "http://127.0.0.1:3000/v1"
+      },
+      "models": {
+        "gemini-browser": {
+          "name": "Gemini Browser Agent"
+        },
+        "gemini-browser-mother": {
+          "name": "Gemini Mother Architect"
+        },
+        "gemini-browser-worker": {
+          "name": "Gemini Dedicated Worker"
+        }
+      }
+    }
+  }
+}
+```
+
+3. Run OpenCode:
+```bash
+opencode
+```
+OpenCode will route its planning and execution turns through your live Gemini browser tabs with full token streaming.
+
+---
+
 ## 📄 License
 MIT

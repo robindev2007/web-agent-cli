@@ -1,0 +1,24 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "web-agent/gemini-browser",
+  "providers": {
+    "web-agent": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Web Agent CLI (Gemini Browser Swarm)",
+      "options": {
+        "baseURL": "http://127.0.0.1:3000/v1"
+      },
+      "models": {
+        "gemini-browser": {
+          "name": "Gemini Browser Agent (Direct Tab)"
+        },
+        "gemini-browser-mother": {
+          "name": "Gemini Mother Architect (Multi-Agent Swarm)"
+        },
+        "gemini-browser-worker": {
+          "name": "Gemini Dedicated Worker"
+        }
+      }
+    }
+  }
+}
