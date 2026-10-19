@@ -6,6 +6,7 @@ export function createBridgeServer(provider: GeminiBrowserProvider) {
   const server = Bun.serve({
     port: CONFIG.SERVER.PORT,
     hostname: CONFIG.SERVER.HOST,
+    idleTimeout: 255, // Prevent Bun from killing long streaming connections after 10s
     async fetch(req, server) {
       const url = new URL(req.url);
 

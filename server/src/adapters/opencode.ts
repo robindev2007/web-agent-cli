@@ -172,14 +172,42 @@ export async function handleOpenCodeRequest(
     // ── Streaming Mode (OpenCode default) ──────────────────────────────────
     if (body.stream) {
       const encoder = new TextEncoder();
+      let isClosed = false;
 
       const stream = new ReadableStream({
         async start(controller) {
+          const safeEnqueue = (payload: string) => {
+            if (isClosed) return;
+            try {
+              controller.enqueue(encoder.encode(payload));
+            } catch {
+              isClosed = true;
+            }
+          };
+
+          const safeClose = () => {
+            if (isClosed) return;
+            isClosed = true;
+            try {
+              controller.close();
+            } catch {}
+          };
+
+          // Heartbeat keep-alive to keep connection alive during Gemini thinking
+          const keepalive = setInterval(() => {
+            if (isClosed) {
+              clearInterval(keepalive);
+              return;
+            }
+            safeEnqueue(": keepalive\n\n");
+          }, 3000);
+
           try {
             await provider.sendPrompt(
               promptText,
               180000,
               (chunk: string) => {
+                if (isClosed) return;
                 const sseData = {
                   id: completionId,
                   object: "chat.completion.chunk",
@@ -193,7 +221,7 @@ export async function handleOpenCodeRequest(
                     },
                   ],
                 };
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(sseData)}\n\n`));
+                safeEnqueue(`data: ${JSON.stringify(sseData)}\n\n`);
               }
             );
 
@@ -211,9 +239,8 @@ export async function handleOpenCodeRequest(
                 },
               ],
             };
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
-            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-            controller.close();
+            safeEnqueue(`data: ${JSON.stringify(finalChunk)}\n\n`);
+            safeEnqueue("data: [DONE]\n\n");
           } catch (err: any) {
             const errChunk = {
               id: completionId,
@@ -228,10 +255,15 @@ export async function handleOpenCodeRequest(
                 },
               ],
             };
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(errChunk)}\n\n`));
-            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-            controller.close();
+            safeEnqueue(`data: ${JSON.stringify(errChunk)}\n\n`);
+            safeEnqueue("data: [DONE]\n\n");
+          } finally {
+            clearInterval(keepalive);
+            safeClose();
           }
+        },
+        cancel() {
+          isClosed = true;
         },
       });
 
