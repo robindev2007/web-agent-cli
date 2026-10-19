@@ -39,9 +39,17 @@ export class GeminiDriver {
 
   static isGenerating(): boolean {
     const stopBtn = document.querySelector(
-      'button[aria-label="Stop response"], button[aria-label*="Stop" i]'
+      'button[aria-label="Stop response"], button[aria-label*="Stop" i], button.stop-button, mat-icon[fonticon="stop"], mat-icon[data-mat-icon-name="stop"]'
     );
-    return !!stopBtn;
+    if (stopBtn) return true;
+
+    // Check for thinking / search in progress / loading indicators
+    const loading = document.querySelector(
+      '.loading-spinner, .sparkle-animation, .generating, [aria-label*="Thinking" i], [aria-label*="Searching" i]'
+    );
+    if (loading) return true;
+
+    return false;
   }
 
   static stopGenerating(): boolean {
@@ -214,10 +222,10 @@ export class GeminiDriver {
   }
 
   /**
-   * Instant response completion detection via MutationObserver with 50ms final settle
+   * Precise response detection isolating only markdown message content
    */
   static async waitForResponse(
-    timeoutMs: number = 60000,
+    timeoutMs: number = 90000,
     onChunk?: (fullText: string, chunk: string) => void
   ): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -225,19 +233,35 @@ export class GeminiDriver {
       let generationDetected = false;
       let settleTimer: any = null;
 
+      // Select ONLY the genuine markdown message content elements (NEVER parent model-response)
       const getResponseElements = (): HTMLElement[] => {
-        const els = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            'message-content, model-response, .model-response-text'
-          )
+        const messageContents = Array.from(
+          document.querySelectorAll<HTMLElement>('message-content')
         );
-        if (els.length > 0) return els;
+        if (messageContents.length > 0) return messageContents;
+
+        const markdowns = Array.from(
+          document.querySelectorAll<HTMLElement>('model-response .markdown, .model-response-text .markdown, .model-response-text')
+        );
+        if (markdowns.length > 0) return markdowns;
+
         return Array.from(document.querySelectorAll<HTMLElement>('.markdown'));
+      };
+
+      // Strip non-content UI junk (search query badges like "Searching the web", citations, action buttons)
+      const extractPureText = (el: HTMLElement | null): string => {
+        if (!el) return '';
+        const clone = el.cloneNode(true) as HTMLElement;
+        const junk = clone.querySelectorAll(
+          '.search-queries, .grounding-carousel, .attribution-container, .citation, button, mat-icon, .actions-container'
+        );
+        junk.forEach((j) => j.remove());
+        return clone.innerText.trim();
       };
 
       const initialElements = getResponseElements();
       const initialCount = initialElements.length;
-      const initialLastText = initialCount > 0 ? initialElements[initialCount - 1].innerText.trim() : '';
+      const initialLastText = initialCount > 0 ? extractPureText(initialElements[initialCount - 1]) : '';
 
       let lastLength = 0;
       let isNewElementFound = false;
@@ -247,13 +271,13 @@ export class GeminiDriver {
         if (currentElements.length > initialCount) {
           isNewElementFound = true;
           const target = currentElements[currentElements.length - 1];
-          return target ? target.innerText.trim() : '';
+          return extractPureText(target);
         }
 
-        // If updated in place
+        // If updated in place within the same element
         if (!isNewElementFound && currentElements.length === initialCount && initialCount > 0) {
           const target = currentElements[initialCount - 1];
-          const text = target ? target.innerText.trim() : '';
+          const text = extractPureText(target);
           if (text !== initialLastText && text.startsWith(initialLastText)) {
             return text.slice(initialLastText.length).trim();
           } else if (text !== initialLastText) {
@@ -287,16 +311,17 @@ export class GeminiDriver {
           generationDetected = true;
         }
 
-        if (generationDetected && !generating) {
+        if (generationDetected && !generating && current.length > 0) {
           if (!settleTimer) {
+            // Wait 1200ms quiet period without new tokens before declaring finish
             settleTimer = setTimeout(() => {
               observer.disconnect();
               clearInterval(watchdog);
               const text = emitChunkIfNew();
               resolve(text || current);
-            }, 200);
+            }, 1200);
           }
-        } else if (generating && settleTimer) {
+        } else if ((generating || current.length > lastLength) && settleTimer) {
           clearTimeout(settleTimer);
           settleTimer = null;
         }
@@ -327,7 +352,7 @@ export class GeminiDriver {
         }
 
         checkCompletion();
-      }, 100);
+      }, 150);
     });
   }
 }
