@@ -307,12 +307,13 @@ export function generateOpenCodeConfig(port: number = 3000): object {
   return {
     $schema: "https://opencode.ai/config.json",
     model: "web-agent/gemini-browser",
-    providers: {
+    provider: {
       "web-agent": {
         npm: "@ai-sdk/openai-compatible",
         name: "Web Agent CLI (Gemini Browser)",
         options: {
           baseURL: `http://127.0.0.1:${port}/v1`,
+          apiKey: "ignored",
         },
         models: {
           "gemini-browser": {
@@ -329,3 +330,4 @@ export function generateOpenCodeConfig(port: number = 3000): object {
     },
   };
 }
+

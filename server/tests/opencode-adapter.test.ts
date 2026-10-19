@@ -46,9 +46,9 @@ describe("OpenCode Adapter — Message Formatting & Config", () => {
   it("generates valid opencode.json schema configuration", () => {
     const config: any = generateOpenCodeConfig(3000);
     expect(config.$schema).toBe("https://opencode.ai/config.json");
-    expect(config.providers["web-agent"]).toBeDefined();
-    expect(config.providers["web-agent"].options.baseURL).toBe("http://127.0.0.1:3000/v1");
-    expect(config.providers["web-agent"].models["gemini-browser"]).toBeDefined();
+    expect(config.provider["web-agent"]).toBeDefined();
+    expect(config.provider["web-agent"].options.baseURL).toBe("http://127.0.0.1:3000/v1");
+    expect(config.provider["web-agent"].models["gemini-browser"]).toBeDefined();
   });
 });
 
@@ -177,3 +177,4 @@ describe("OpenCode Adapter — HTTP API Protocol", () => {
     expect(text).toContain("[DONE]");
   });
 });
+
