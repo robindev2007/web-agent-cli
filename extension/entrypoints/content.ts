@@ -4,6 +4,12 @@ export default defineContentScript({
   matches: ['https://gemini.google.com/app*'],
   runAt: 'document_idle',
   main() {
+    // Prevent duplicate content script listeners in the same tab
+    if ((window as any).__GEMINI_AGENT_CONTENT_LOADED__) {
+      return;
+    }
+    (window as any).__GEMINI_AGENT_CONTENT_LOADED__ = true;
+
     console.log('%c[Gemini Agent] Content script loaded with GeminiDriver!', 'background: #1a73e8; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: bold;');
 
     // Expose driver globally on window for instant testing in Console

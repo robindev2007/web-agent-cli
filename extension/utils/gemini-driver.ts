@@ -217,7 +217,7 @@ export class GeminiDriver {
    * Instant response completion detection via MutationObserver with 50ms final settle
    */
   static async waitForResponse(
-    timeoutMs: number = 35000,
+    timeoutMs: number = 60000,
     onChunk?: (fullText: string, chunk: string) => void
   ): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -225,24 +225,47 @@ export class GeminiDriver {
       let generationDetected = false;
       let settleTimer: any = null;
 
-      const extractFinalText = () => {
-        const elements = document.querySelectorAll('message-content, model-response, .model-response-text');
-        if (elements.length > 0) {
-          return (elements[elements.length - 1] as HTMLElement).innerText.trim();
+      const getResponseElements = (): HTMLElement[] => {
+        const els = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            'message-content, model-response, .model-response-text'
+          )
+        );
+        if (els.length > 0) return els;
+        return Array.from(document.querySelectorAll<HTMLElement>('.markdown'));
+      };
+
+      const initialElements = getResponseElements();
+      const initialCount = initialElements.length;
+      const initialLastText = initialCount > 0 ? initialElements[initialCount - 1].innerText.trim() : '';
+
+      let lastLength = 0;
+      let isNewElementFound = false;
+
+      const extractCurrentText = (): string => {
+        const currentElements = getResponseElements();
+        if (currentElements.length > initialCount) {
+          isNewElementFound = true;
+          const target = currentElements[currentElements.length - 1];
+          return target ? target.innerText.trim() : '';
         }
-        const markdown = document.querySelectorAll('.markdown');
-        if (markdown.length > 0) {
-          return (markdown[markdown.length - 1] as HTMLElement).innerText.trim();
+
+        // If updated in place
+        if (!isNewElementFound && currentElements.length === initialCount && initialCount > 0) {
+          const target = currentElements[initialCount - 1];
+          const text = target ? target.innerText.trim() : '';
+          if (text !== initialLastText && text.startsWith(initialLastText)) {
+            return text.slice(initialLastText.length).trim();
+          } else if (text !== initialLastText) {
+            return text;
+          }
         }
+
         return '';
       };
 
-      const initialText = extractFinalText();
-      const initialLength = initialText.length;
-      let lastLength = initialLength;
-
-      const emitChunkIfNew = () => {
-        const current = extractFinalText();
+      const emitChunkIfNew = (): string => {
+        const current = extractCurrentText();
         if (current.length > lastLength) {
           const delta = current.slice(lastLength);
           lastLength = current.length;
@@ -260,7 +283,7 @@ export class GeminiDriver {
         const generating = this.isGenerating();
         const current = emitChunkIfNew();
 
-        if (generating || current.length > initialLength) {
+        if (generating || current.length > 0) {
           generationDetected = true;
         }
 
@@ -271,7 +294,7 @@ export class GeminiDriver {
               clearInterval(watchdog);
               const text = emitChunkIfNew();
               resolve(text || current);
-            }, 150);
+            }, 200);
           }
         } else if (generating && settleTimer) {
           clearTimeout(settleTimer);
@@ -295,7 +318,7 @@ export class GeminiDriver {
           clearInterval(watchdog);
           observer.disconnect();
           const current = emitChunkIfNew();
-          if (current.length > initialLength) {
+          if (current.length > 0) {
             resolve(current);
           } else {
             reject(new Error('Timeout waiting for Gemini response.'));
