@@ -194,6 +194,32 @@ export class GeminiDriver {
     return true;
   }
 
+  static getResponseElements(): HTMLElement[] {
+    const messageContents = Array.from(
+      document.querySelectorAll<HTMLElement>('message-content')
+    );
+    if (messageContents.length > 0) return messageContents;
+
+    const markdowns = Array.from(
+      document.querySelectorAll<HTMLElement>('model-response .markdown, .model-response-text .markdown, .model-response-text')
+    );
+    if (markdowns.length > 0) return markdowns;
+
+    return Array.from(document.querySelectorAll<HTMLElement>('.markdown'));
+  }
+
+  static extractPureText(el: HTMLElement | null): string {
+    if (!el) return '';
+    const clone = el.cloneNode(true) as HTMLElement;
+    const junk = clone.querySelectorAll(
+      '.search-queries, .grounding-carousel, .attribution-container, .citation, button, mat-icon, .actions-container'
+    );
+    junk.forEach((j) => j.remove());
+    return clone.innerText.trim();
+  }
+
+  static lastResponseCount: number = 0;
+
   /**
    * Send prompt with clean auto-wait:
    * If Gemini is currently generating, wait for it to finish naturally without clicking Stop.
@@ -214,6 +240,9 @@ export class GeminiDriver {
       await new Promise((r) => setTimeout(r, 200));
     }
 
+    // Anchor the baseline response count BEFORE injecting and clicking send
+    GeminiDriver.lastResponseCount = this.getResponseElements().length;
+
     const typed = await this.setPromptText(text);
     if (!typed) return { success: false, error: 'Failed to type prompt into editor.' };
 
@@ -233,58 +262,15 @@ export class GeminiDriver {
       let generationDetected = false;
       let settleTimer: any = null;
 
-      // Select ONLY the genuine markdown message content elements (NEVER parent model-response)
-      const getResponseElements = (): HTMLElement[] => {
-        const messageContents = Array.from(
-          document.querySelectorAll<HTMLElement>('message-content')
-        );
-        if (messageContents.length > 0) return messageContents;
-
-        const markdowns = Array.from(
-          document.querySelectorAll<HTMLElement>('model-response .markdown, .model-response-text .markdown, .model-response-text')
-        );
-        if (markdowns.length > 0) return markdowns;
-
-        return Array.from(document.querySelectorAll<HTMLElement>('.markdown'));
-      };
-
-      // Strip non-content UI junk (search query badges like "Searching the web", citations, action buttons)
-      const extractPureText = (el: HTMLElement | null): string => {
-        if (!el) return '';
-        const clone = el.cloneNode(true) as HTMLElement;
-        const junk = clone.querySelectorAll(
-          '.search-queries, .grounding-carousel, .attribution-container, .citation, button, mat-icon, .actions-container'
-        );
-        junk.forEach((j) => j.remove());
-        return clone.innerText.trim();
-      };
-
-      const initialElements = getResponseElements();
-      const initialCount = initialElements.length;
-      const initialLastText = initialCount > 0 ? extractPureText(initialElements[initialCount - 1]) : '';
-
+      const initialCount = GeminiDriver.lastResponseCount;
       let lastLength = 0;
-      let isNewElementFound = false;
 
       const extractCurrentText = (): string => {
-        const currentElements = getResponseElements();
+        const currentElements = GeminiDriver.getResponseElements();
         if (currentElements.length > initialCount) {
-          isNewElementFound = true;
           const target = currentElements[currentElements.length - 1];
-          return extractPureText(target);
+          return GeminiDriver.extractPureText(target);
         }
-
-        // If updated in place within the same element
-        if (!isNewElementFound && currentElements.length === initialCount && initialCount > 0) {
-          const target = currentElements[initialCount - 1];
-          const text = extractPureText(target);
-          if (text !== initialLastText && text.startsWith(initialLastText)) {
-            return text.slice(initialLastText.length).trim();
-          } else if (text !== initialLastText) {
-            return text;
-          }
-        }
-
         return '';
       };
 

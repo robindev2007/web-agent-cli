@@ -3,7 +3,9 @@ import {
   formatMessagesForGemini,
   handleOpenCodeRequest,
   generateOpenCodeConfig,
+  parseToolCallsFromResponse,
   type ChatMessage,
+  type ChatCompletionTool,
 } from "../src/adapters/opencode";
 import { GeminiBrowserProvider } from "../src/providers";
 
@@ -43,12 +45,72 @@ describe("OpenCode Adapter — Message Formatting & Config", () => {
     expect(result).toContain("Part 2 of prompt");
   });
 
+  it("injects tool definitions into prompt when tools are provided", () => {
+    const messages: ChatMessage[] = [{ role: "user", content: "how many ram do i hav?" }];
+    const tools: ChatCompletionTool[] = [
+      {
+        type: "function",
+        function: {
+          name: "bash",
+          description: "Execute a bash command in the terminal",
+          parameters: {
+            type: "object",
+            properties: { command: { type: "string" } },
+            required: ["command"],
+          },
+        },
+      },
+    ];
+
+    const result = formatMessagesForGemini(messages, tools);
+    expect(result).toContain("[SYSTEM - AGENT TOOLS AVAILABLE]:");
+    expect(result).toContain("bash: Execute a bash command in the terminal");
+    expect(result).toContain("[tool_call: <tool_name> for '<command>']");
+    expect(result).toContain("how many ram do i hav?");
+  });
+
   it("generates valid opencode.json schema configuration", () => {
     const config: any = generateOpenCodeConfig(3000);
     expect(config.$schema).toBe("https://opencode.ai/config.json");
     expect(config.provider["web-agent"]).toBeDefined();
     expect(config.provider["web-agent"].options.baseURL).toBe("http://127.0.0.1:3000/v1");
     expect(config.provider["web-agent"].models["gemini-browser"]).toBeDefined();
+  });
+});
+
+describe("OpenCode Adapter — Tool Call Parsing", () => {
+  it("parses bracketed tool_call syntax", () => {
+    const raw = "[tool_call: bash for 'systeminfo']";
+    const { cleanContent, toolCalls } = parseToolCallsFromResponse(raw);
+
+    expect(toolCalls.length).toBe(1);
+    expect(toolCalls[0].function.name).toBe("bash");
+    const args = JSON.parse(toolCalls[0].function.arguments);
+    expect(args.command).toBe("systeminfo");
+    expect(cleanContent).toBe("");
+  });
+
+  it("parses tool call with working_dir", () => {
+    const raw = "I will create the app now.\n\n[tool_call: bash for 'npx create-next-app@latest hellp-js' working_dir='D:/robin']";
+    const { cleanContent, toolCalls } = parseToolCallsFromResponse(raw);
+
+    expect(toolCalls.length).toBe(1);
+    expect(toolCalls[0].function.name).toBe("bash");
+    const args = JSON.parse(toolCalls[0].function.arguments);
+    expect(args.command).toContain("npx -y create-next-app@latest hellp-js");
+    expect(args.working_dir).toBe("D:/robin");
+    expect(cleanContent).toContain("I will create the app now.");
+  });
+
+  it("parses markdown json tool_call blocks", () => {
+    const raw = "```tool_call\n{\"name\": \"bash\", \"arguments\": {\"command\": \"wmic computersystem get totalphysicalmemory\"}}\n```";
+    const { cleanContent, toolCalls } = parseToolCallsFromResponse(raw);
+
+    expect(toolCalls.length).toBe(1);
+    expect(toolCalls[0].function.name).toBe("bash");
+    const args = JSON.parse(toolCalls[0].function.arguments);
+    expect(args.command).toBe("wmic computersystem get totalphysicalmemory");
+    expect(cleanContent).toBe("");
   });
 });
 
