@@ -56,7 +56,7 @@ export class GeminiDriver {
   }
 
   /**
-   * Fast, native text injection with automatic fallback
+   * Fast, human-like text injection with natural jitter
    */
   static async setPromptText(text: string): Promise<boolean> {
     const editor = this.getEditor();
@@ -72,6 +72,9 @@ export class GeminiDriver {
       sel.removeAllRanges();
       sel.addRange(range);
     }
+
+    // Small natural delay (30-80ms)
+    await new Promise((r) => setTimeout(r, 30 + Math.floor(Math.random() * 50)));
 
     let inserted = false;
     try {
@@ -93,27 +96,63 @@ export class GeminiDriver {
     editor.dispatchEvent(new Event('change', { bubbles: true }));
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
 
+    // Natural human pause before clicking send (100-250ms)
+    await new Promise((r) => setTimeout(r, 120 + Math.floor(Math.random() * 120)));
+
     return inserted;
   }
 
   /**
-   * High-speed click send with button click and Enter key trigger
+   * Humanized click send with realistic mouse hover/down/up events and Enter key
    */
   static async clickSend(): Promise<boolean> {
     const editor = this.getEditor();
-
-    // 1. Click send button directly if found
     const sendBtn = this.getSendButton();
+
     if (sendBtn) {
+      // Give Angular / Lit a natural moment to register the input and enable the button
+      for (let i = 0; i < 12; i++) {
+        if (!sendBtn.disabled && sendBtn.getAttribute('aria-disabled') !== 'true') break;
+        await new Promise((r) => setTimeout(r, 35));
+      }
+
       sendBtn.removeAttribute('disabled');
       sendBtn.setAttribute('aria-disabled', 'false');
+
+      // Dispatch natural pointer/mouse interaction sequence
+      const PointerCtor = typeof PointerEvent !== 'undefined' ? PointerEvent : MouseEvent;
+      const pointerInit = { bubbles: true, cancelable: true, view: window, pointerType: 'mouse', isPrimary: true };
+      const mouseInit = { bubbles: true, cancelable: true, view: window, button: 0 };
+
+      try {
+        sendBtn.dispatchEvent(new PointerCtor('pointerover', pointerInit));
+        sendBtn.dispatchEvent(new PointerCtor('pointerenter', pointerInit));
+        sendBtn.dispatchEvent(new PointerCtor('pointerdown', pointerInit));
+      } catch {}
+
+      sendBtn.dispatchEvent(new MouseEvent('mousedown', mouseInit));
+
+      try {
+        sendBtn.dispatchEvent(new PointerCtor('pointerup', pointerInit));
+      } catch {}
+
+      sendBtn.dispatchEvent(new MouseEvent('mouseup', mouseInit));
       sendBtn.click();
     }
 
-    // 2. Dispatch Enter key to trigger submit
+    // 2. Dispatch Enter key with realistic keydown/keypress/keyup sequence
     if (editor) {
       editor.dispatchEvent(
         new KeyboardEvent('keydown', {
+          key: 'Enter',
+          code: 'Enter',
+          keyCode: 13,
+          which: 13,
+          bubbles: true,
+        })
+      );
+      editor.dispatchEvent(
+        new KeyboardEvent('keypress', {
           key: 'Enter',
           code: 'Enter',
           keyCode: 13,
@@ -132,8 +171,8 @@ export class GeminiDriver {
       );
     }
 
-    // 3. Short poll (up to 1.5s) to check if generation started or editor cleared
-    for (let i = 0; i < 15; i++) {
+    // 3. Poll for confirmation (isGenerating OR editor cleared)
+    for (let i = 0; i < 20; i++) {
       if (this.isGenerating()) return true;
       if (editor && !editor.innerText.trim()) return true;
 
@@ -152,13 +191,16 @@ export class GeminiDriver {
    * If Gemini is currently generating, wait for it to finish naturally without clicking Stop.
    */
   static async sendPrompt(text: string): Promise<{ success: boolean; error?: string }> {
-    // Wait for any previous turn to finish naturally (do NOT click stop!)
-    for (let i = 0; i < 20; i++) {
+    // Wait for any previous turn to finish naturally
+    for (let i = 0; i < 30; i++) {
       if (!this.isGenerating()) break;
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 150));
     }
 
-    // Wait for editor element to appear in DOM (critical for newly opened tabs)
+    // Natural human pause before interacting (200-450ms)
+    await new Promise((r) => setTimeout(r, 200 + Math.floor(Math.random() * 250)));
+
+    // Wait for editor element to appear in DOM
     for (let i = 0; i < 30; i++) {
       if (this.getEditor()) break;
       await new Promise((r) => setTimeout(r, 200));

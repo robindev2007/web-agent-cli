@@ -150,7 +150,10 @@ export class MultiAgentOrchestrator {
   /**
    * Ask the Mother AI to classify whether a task needs multi-agent or solo execution.
    */
-  public async aiClassifyTask(userGoal: string): Promise<{
+  public async aiClassifyTask(
+    userGoal: string,
+    options?: { forceLocal?: boolean }
+  ): Promise<{
     mode: AgentMode;
     reason: string;
     confidence: "high" | "medium" | "low";
@@ -172,7 +175,7 @@ export class MultiAgentOrchestrator {
       };
     }
 
-    if (!this.motherProvider.isReady()) {
+    if (options?.forceLocal || !this.motherProvider.isReady()) {
       const local = classifyTask(userGoal);
       return { ...local, source: "local" };
     }

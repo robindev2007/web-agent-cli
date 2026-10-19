@@ -59,7 +59,8 @@ export async function startTerminalUI() {
     const spinner = p.spinner();
     spinner.start("Mother AI is analyzing task & planning execution strategy...");
 
-    const classification = await orchestrator.aiClassifyTask(goalText);
+    // Use fast local classification in terminal to avoid duplicate Gemini prompts and bot detection
+    const classification = await orchestrator.aiClassifyTask(goalText, { forceLocal: true });
     const { mode, reason, source, tasks = [] } = classification;
 
     spinner.stop("Execution Strategy Decided");
