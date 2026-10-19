@@ -6,9 +6,30 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, x-requested-with",
 };
 
+export interface OpenAIToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string | Array<{ type: string; text?: string }>;
+  content?: string | Array<{ type: string; text?: string }> | null;
+  name?: string;
+  tool_call_id?: string;
+  tool_calls?: OpenAIToolCall[];
+}
+
+export interface ChatCompletionTool {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters?: any;
+  };
 }
 
 export interface ChatCompletionRequest {
@@ -17,15 +38,154 @@ export interface ChatCompletionRequest {
   stream?: boolean;
   temperature?: number;
   max_tokens?: number;
+  tools?: ChatCompletionTool[];
+  tool_choice?: any;
+}
+
+/**
+ * Parses tool calls formatted by Gemini into structured OpenAI tool calls
+ */
+export function parseToolCallsFromResponse(rawText: string): {
+  cleanContent: string;
+  toolCalls: OpenAIToolCall[];
+} {
+  const toolCalls: OpenAIToolCall[] = [];
+  let cleanContent = rawText;
+
+  // 1. Match Gemini/OpenCode CLI syntax:
+  // [tool_call: bash for 'npx create-next-app...' working_dir='D:/robin']
+  // or tool_call: bash for '...'
+  const bashForRegex = /\[?tool_call:\s*([a-zA-Z0-9_\-]+)\s+for\s+['"]([\s\S]*?)['"](?:\s+working_dir=['"]([\s\S]*?)['"])?\]?/gi;
+  let match: RegExpExecArray | null;
+  while ((match = bashForRegex.exec(rawText)) !== null) {
+    const toolName = match[1];
+    let command = match[2];
+    const workingDir = match[3];
+
+    // Ensure npx has -y so non-interactive execution never hangs on prompt
+    if (command.startsWith("npx ") && !command.includes(" -y ") && !command.startsWith("npx -y ")) {
+      command = command.replace(/^npx\s+/, "npx -y ");
+    }
+
+    const args: Record<string, any> = { command };
+    if (workingDir) {
+      args.working_dir = workingDir;
+    }
+
+    toolCalls.push({
+      id: `call_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+      type: "function",
+      function: {
+        name: toolName,
+        arguments: JSON.stringify(args),
+      },
+    });
+
+    cleanContent = cleanContent.replace(match[0], "").trim();
+  }
+
+  // 2. Match JSON code blocks: ```tool_call ... ``` or ```json ... ```
+  const jsonBlockRegex = /```(?:tool_call|json)?\s*\n?(\{\s*[\s\S]*?"(?:name|tool)"\s*:[\s\S]*?\})\s*```/gi;
+  while ((match = jsonBlockRegex.exec(rawText)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      const toolName = parsed.name || parsed.tool;
+      const rawArgs = parsed.arguments || parsed.args || parsed.params || parsed.parameters || parsed;
+      let argsObj: Record<string, any> = {};
+
+      if (typeof rawArgs === "string") {
+        try {
+          argsObj = JSON.parse(rawArgs);
+        } catch {
+          argsObj = { command: rawArgs };
+        }
+      } else if (typeof rawArgs === "object" && rawArgs !== null) {
+        argsObj = { ...rawArgs };
+        delete argsObj.name;
+        delete argsObj.tool;
+      }
+
+      if (toolName && typeof toolName === "string") {
+        if (argsObj.command && typeof argsObj.command === "string") {
+          if (argsObj.command.startsWith("npx ") && !argsObj.command.includes(" -y ") && !argsObj.command.startsWith("npx -y ")) {
+            argsObj.command = argsObj.command.replace(/^npx\s+/, "npx -y ");
+          }
+        }
+
+        toolCalls.push({
+          id: `call_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+          type: "function",
+          function: {
+            name: toolName,
+            arguments: JSON.stringify(argsObj),
+          },
+        });
+
+        cleanContent = cleanContent.replace(match[0], "").trim();
+      }
+    } catch {}
+  }
+
+  // 3. Match XML tag: <tool_call> ... </tool_call>
+  const xmlTagRegex = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
+  while ((match = xmlTagRegex.exec(rawText)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      const toolName = parsed.name || parsed.tool;
+      const rawArgs = parsed.arguments || parsed.args || parsed;
+      const argsObj = typeof rawArgs === "object" && rawArgs !== null ? { ...rawArgs } : { input: rawArgs };
+      delete argsObj.name;
+      delete argsObj.tool;
+
+      if (toolName && typeof toolName === "string") {
+        toolCalls.push({
+          id: `call_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+          type: "function",
+          function: {
+            name: toolName,
+            arguments: JSON.stringify(argsObj),
+          },
+        });
+
+        cleanContent = cleanContent.replace(match[0], "").trim();
+      }
+    } catch {}
+  }
+
+  return { cleanContent, toolCalls };
 }
 
 /**
  * Format chat message history into structured text for Gemini DOM injection
  */
-export function formatMessagesForGemini(messages: ChatMessage[]): string {
+export function formatMessagesForGemini(
+  messages: ChatMessage[],
+  tools?: ChatCompletionTool[]
+): string {
   if (!messages || messages.length === 0) return "";
 
   const formattedParts: string[] = [];
+
+  // Inject available tools into guidance so Gemini knows what tools exist and how to call them
+  if (tools && tools.length > 0) {
+    const toolList = tools
+      .map((t) => {
+        const params = t.function.parameters?.properties
+          ? Object.keys(t.function.parameters.properties).join(", ")
+          : "";
+        return `- ${t.function.name}: ${t.function.description || ""}${params ? ` (parameters: ${params})` : ""}`;
+      })
+      .join("\n");
+
+    formattedParts.push(
+      `[SYSTEM - TOOL CALLING CAPABILITY]:\nYou have access to the following workspace tools:\n${toolList}\n\n` +
+      `When you need to run commands or interact with the project, invoke tools using this format:\n` +
+      `[tool_call: tool_name for 'command' working_dir='dir']\n` +
+      `OR\n` +
+      `\`\`\`tool_call\n{"name": "tool_name", "arguments": {"param": "value"}}\n\`\`\`\n` +
+      `Always perform the action directly via tool calls rather than asking the user.`
+    );
+  }
 
   for (const m of messages) {
     let text = "";
@@ -35,12 +195,21 @@ export function formatMessagesForGemini(messages: ChatMessage[]): string {
       text = m.content.map((c) => c.text || "").filter(Boolean).join("\n");
     }
 
+    if (m.role === "assistant") {
+      let part = text ? `[ASSISTANT]:\n${text}` : "";
+      if (m.tool_calls && m.tool_calls.length > 0) {
+        for (const tc of m.tool_calls) {
+          part += `\n[ASSISTANT CALLED TOOL: ${tc.function.name}]\nArguments: ${tc.function.arguments}`;
+        }
+      }
+      if (part.trim()) formattedParts.push(part.trim());
+      continue;
+    }
+
     if (!text.trim()) continue;
 
     if (m.role === "system") {
       formattedParts.push(`[SYSTEM INSTRUCTIONS]:\n${text}`);
-    } else if (m.role === "assistant") {
-      formattedParts.push(`[ASSISTANT]:\n${text}`);
     } else if (m.role === "tool") {
       formattedParts.push(`[TOOL RESULT]:\n${text}`);
     } else {
@@ -151,7 +320,7 @@ export async function handleOpenCodeRequest(
 
     const completionId = `chatcmpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     const modelId = body.model || "gemini-browser";
-    const promptText = formatMessagesForGemini(body.messages || []);
+    const promptText = formatMessagesForGemini(body.messages || [], body.tools);
 
     if (!promptText.trim()) {
       return new Response(
@@ -202,44 +371,139 @@ export async function handleOpenCodeRequest(
             safeEnqueue(": keepalive\n\n");
           }, 3000);
 
+          let fullResponseText = "";
+          let streamedIndex = 0;
+
           try {
-            await provider.sendPrompt(
+            const rawResponse = await provider.sendPrompt(
               promptText,
               180000,
               (chunk: string) => {
                 if (isClosed) return;
-                const sseData = {
-                  id: completionId,
-                  object: "chat.completion.chunk",
-                  created: Math.floor(Date.now() / 1000),
-                  model: modelId,
-                  choices: [
-                    {
-                      index: 0,
-                      delta: { content: chunk },
-                      finish_reason: null,
-                    },
-                  ],
-                };
-                safeEnqueue(`data: ${JSON.stringify(sseData)}\n\n`);
+                fullResponseText += chunk;
+
+                // Stream content safely as long as it doesn't enter a tool call syntax
+                const toolCallMarker = fullResponseText.search(/\[?tool_call:|```(?:tool_call|json)?|<tool_call/i);
+                if (toolCallMarker === -1) {
+                  if (fullResponseText.length > streamedIndex) {
+                    const deltaText = fullResponseText.slice(streamedIndex);
+                    streamedIndex = fullResponseText.length;
+                    const sseData = {
+                      id: completionId,
+                      object: "chat.completion.chunk",
+                      created: Math.floor(Date.now() / 1000),
+                      model: modelId,
+                      choices: [
+                        {
+                          index: 0,
+                          delta: { content: deltaText },
+                          finish_reason: null,
+                        },
+                      ],
+                    };
+                    safeEnqueue(`data: ${JSON.stringify(sseData)}\n\n`);
+                  }
+                } else if (toolCallMarker > streamedIndex) {
+                  const deltaText = fullResponseText.slice(streamedIndex, toolCallMarker);
+                  streamedIndex = toolCallMarker;
+                  if (deltaText.trim()) {
+                    const sseData = {
+                      id: completionId,
+                      object: "chat.completion.chunk",
+                      created: Math.floor(Date.now() / 1000),
+                      model: modelId,
+                      choices: [
+                        {
+                          index: 0,
+                          delta: { content: deltaText },
+                          finish_reason: null,
+                        },
+                      ],
+                    };
+                    safeEnqueue(`data: ${JSON.stringify(sseData)}\n\n`);
+                  }
+                }
               }
             );
 
-            // Final stop chunk
-            const finalChunk = {
-              id: completionId,
-              object: "chat.completion.chunk",
-              created: Math.floor(Date.now() / 1000),
-              model: modelId,
-              choices: [
-                {
-                  index: 0,
-                  delta: {},
-                  finish_reason: "stop",
-                },
-              ],
-            };
-            safeEnqueue(`data: ${JSON.stringify(finalChunk)}\n\n`);
+            const responseToParse = rawResponse || fullResponseText;
+            const { cleanContent, toolCalls } = parseToolCallsFromResponse(responseToParse);
+
+            if (toolCalls.length > 0) {
+              // Emit any clean conversational text that wasn't streamed yet
+              if (cleanContent && cleanContent.length > streamedIndex) {
+                const remaining = cleanContent.slice(streamedIndex);
+                if (remaining.trim()) {
+                  safeEnqueue(`data: ${JSON.stringify({
+                    id: completionId,
+                    object: "chat.completion.chunk",
+                    created: Math.floor(Date.now() / 1000),
+                    model: modelId,
+                    choices: [{ index: 0, delta: { content: remaining }, finish_reason: null }],
+                  })}\n\n`);
+                }
+              }
+
+              // Emit tool calls delta
+              safeEnqueue(`data: ${JSON.stringify({
+                id: completionId,
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: modelId,
+                choices: [
+                  {
+                    index: 0,
+                    delta: { tool_calls: toolCalls },
+                    finish_reason: null,
+                  },
+                ],
+              })}\n\n`);
+
+              // Final stop chunk with tool_calls finish reason
+              safeEnqueue(`data: ${JSON.stringify({
+                id: completionId,
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: modelId,
+                choices: [
+                  {
+                    index: 0,
+                    delta: {},
+                    finish_reason: "tool_calls",
+                  },
+                ],
+              })}\n\n`);
+            } else {
+              // No tool call, flush any unstreamed content
+              if (responseToParse.length > streamedIndex) {
+                const remaining = responseToParse.slice(streamedIndex);
+                if (remaining) {
+                  safeEnqueue(`data: ${JSON.stringify({
+                    id: completionId,
+                    object: "chat.completion.chunk",
+                    created: Math.floor(Date.now() / 1000),
+                    model: modelId,
+                    choices: [{ index: 0, delta: { content: remaining }, finish_reason: null }],
+                  })}\n\n`);
+                }
+              }
+
+              // Final stop chunk
+              safeEnqueue(`data: ${JSON.stringify({
+                id: completionId,
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: modelId,
+                choices: [
+                  {
+                    index: 0,
+                    delta: {},
+                    finish_reason: "stop",
+                  },
+                ],
+              })}\n\n`);
+            }
+
             safeEnqueue("data: [DONE]\n\n");
           } catch (err: any) {
             const errChunk = {
@@ -281,7 +545,9 @@ export async function handleOpenCodeRequest(
     // ── Non-Streaming Mode ────────────────────────────────────────────────
     try {
       const fullResponse = await provider.sendPrompt(promptText, 180000);
+      const { cleanContent, toolCalls } = parseToolCallsFromResponse(fullResponse);
 
+      const isToolCall = toolCalls.length > 0;
       const completionResponse = {
         id: completionId,
         object: "chat.completion",
@@ -292,9 +558,10 @@ export async function handleOpenCodeRequest(
             index: 0,
             message: {
               role: "assistant",
-              content: fullResponse,
+              content: isToolCall ? (cleanContent || null) : fullResponse,
+              ...(isToolCall ? { tool_calls: toolCalls } : {}),
             },
-            finish_reason: "stop",
+            finish_reason: isToolCall ? "tool_calls" : "stop",
           },
         ],
         usage: {

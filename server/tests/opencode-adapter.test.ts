@@ -176,5 +176,63 @@ describe("OpenCode Adapter — HTTP API Protocol", () => {
     expect(text).toContain("world!");
     expect(text).toContain("[DONE]");
   });
+
+  it("handles streaming tool calls from Gemini and emits tool_calls chunks", async () => {
+    (provider as any).isReady = () => true;
+    (provider as any).sendPrompt = async () => {
+      return (
+        "I will create the Next.js project now.\n\n" +
+        "[tool_call: bash for 'npx create-next-app@latest hellp-js --typescript' working_dir='D:/robin']"
+      );
+    };
+
+    const req = new Request("http://127.0.0.1:3000/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gemini-browser",
+        messages: [{ role: "user", content: "create a next js project" }],
+        stream: true,
+      }),
+    });
+
+    const res = await handleOpenCodeRequest(req, provider);
+    expect(res?.status).toBe(200);
+
+    const text = await res?.text();
+    expect(text).toContain("tool_calls");
+    expect(text).toContain("bash");
+    expect(text).toContain("npx -y create-next-app@latest hellp-js");
+    expect(text).toContain("finish_reason\":\"tool_calls\"");
+  });
+
+  it("handles non-streaming tool calls and formats OpenAI tool_calls structure", async () => {
+    (provider as any).isReady = () => true;
+    (provider as any).sendPrompt = async () => {
+      return (
+        "Running the command:\n" +
+        "```tool_call\n{\"name\": \"bash\", \"arguments\": {\"command\": \"dir\"}}\n```"
+      );
+    };
+
+    const req = new Request("http://127.0.0.1:3000/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gemini-browser",
+        messages: [{ role: "user", content: "list files" }],
+        stream: false,
+      }),
+    });
+
+    const res = await handleOpenCodeRequest(req, provider);
+    expect(res?.status).toBe(200);
+
+    const body = await res?.json();
+    expect(body.choices[0].finish_reason).toBe("tool_calls");
+    expect(body.choices[0].message.tool_calls).toBeDefined();
+    expect(body.choices[0].message.tool_calls[0].function.name).toBe("bash");
+    expect(JSON.parse(body.choices[0].message.tool_calls[0].function.arguments).command).toBe("dir");
+  });
 });
 
